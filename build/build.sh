@@ -17,9 +17,6 @@
 BUILD="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 echo "build path is $BUILD"
 
-# Initialize the needed mizar submodule
-git submodule update --init --recursive
-
 # Prepare dependencies
 echo "--- prepare dependencies ---"
 ./build/machine-init.sh
