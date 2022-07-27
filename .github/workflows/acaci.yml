@@ -23,18 +23,18 @@ on:
     paths:
       - '**'
       - '!docs/**'
-      
-jobs:
 
+jobs:
   build:
 
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v1
-        with:
-          token: ${{ secrets.ACCESS_TOKEN }}
-          submodules: true
-      - name: Build Arion Agent
-        run: sudo ./build/build.sh
-        working-directory: .
+      - name: find dir
+        run: cd ../..
+      - name: enlist submodule
+        run: git submodule update --init --recursive
+      - name: machine init
+        run: ./build/machine-init.sh
+      - name: make
+        run: cmake . && make
