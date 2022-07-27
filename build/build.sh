@@ -22,7 +22,7 @@ git submodule update --init --recursive
 
 # Prepare dependencies
 echo "--- prepare dependencies ---"
-./machine-init.sh
+./build/machine-init.sh
 
 echo "--- building arion-agent ---"
 cmake . && make
