@@ -3,9 +3,7 @@ Arion Agent: Local Network Agent on each Arion Wing
 
 
 ## Compile
-* git submodule update --init --recursive
-* cmake .
-* make
+* ./build/build.sh
 
 
 ## Sample command to start ArionAgent: 
