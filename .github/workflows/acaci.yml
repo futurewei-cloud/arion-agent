@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: find dir
-        run: cd ../..
+        run: ls
       - name: enlist submodule
         run: git submodule update --init --recursive
       - name: machine init
