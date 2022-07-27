@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # MIT License
 # Copyright(c) 2022 Futurewei Cloud
 #
@@ -12,29 +14,17 @@
 #     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 #     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-name: Agent Build CI
+BUILD="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+echo "build path is $BUILD"
 
-on:
-  push:
-    paths:
-      - '**'
-      - '!docs/**'
-  pull_request:
-    paths:
-      - '**'
-      - '!docs/**'
-      
-jobs:
+# Initialize the needed mizar submodule
+git submodule update --init --recursive
 
-  build:
+# Prepare dependencies
+echo "--- prepare dependencies ---"
+./machine-init.sh
 
-    runs-on: ubuntu-latest
+echo "--- building arion-agent ---"
+cmake . && make
 
-    steps:
-      - uses: actions/checkout@v1
-        with:
-          token: ${{ secrets.ACCESS_TOKEN }}
-          submodules: true
-      - name: Build Arion Agent
-        run: ./build/build.sh
-        working-directory: .
+fi
