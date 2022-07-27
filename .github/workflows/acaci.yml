@@ -36,5 +36,5 @@ jobs:
           token: ${{ secrets.ACCESS_TOKEN }}
           submodules: true
       - name: Build Arion Agent
-        run: ./build/build.sh
+        run: sudo ./build/build.sh
         working-directory: .
