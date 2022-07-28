@@ -100,8 +100,18 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                         struct sockaddr_in ep_hip;
                         inet_pton(AF_INET, host_ip.c_str(), &(ep_hip.sin_addr));
                         ep.hip = ep_hip.sin_addr.s_addr;
-                        std::copy(vpc_mac.cbegin(), vpc_mac.cend(), ep.mac);
-                        std::copy(host_mac.cbegin(), host_mac.cend(), ep.hmac);
+
+                        // handle vpc mac address
+                        std::sscanf(vpc_mac.c_str(),
+                                    "%02x:%02x:%02x:%02x:%02x:%02x",
+                                    &ep.mac[0], &ep.mac[1], &ep.mac[2],
+                                    &ep.mac[3], &ep.mac[4], &ep.mac[5]);
+
+                        // handle host mac address
+                        std::sscanf(host_mac.c_str(),
+                                    "%02x:%02x:%02x:%02x:%02x:%02x",
+                                    &ep.hmac[0], &ep.hmac[1], &ep.hmac[2],
+                                    &ep.hmac[3], &ep.hmac[4], &ep.hmac[5]);
 
                         int rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
 
