@@ -64,9 +64,9 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
     call->stream = stub_->AsyncWatch(&call->context, cq, (void*)tag_watch);
 
     // start time
-    //std::chrono::_V2::steady_clock::time_point start;
+    std::chrono::_V2::steady_clock::time_point start;
 
-    //std::atomic<int> i(tag_watch + 1);
+    std::atomic<int> i(tag_watch + 1);
     bool write_done = false;
     while (cq->Next(&got_tag, &ok)) {
         if (ok) {
@@ -89,7 +89,7 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                 int fd = fd_neighbor_ebpf_map;
 
                 if ("" != vpc_ip) { //non-empty rule
-                    marl::schedule([=] {
+                    marl::schedule([this, &i, vni, vpc_ip, vpc_mac, host_ip, host_mac, fd, start] {
                         endpoint_key_t epkey;
                         epkey.vni = vni;
                         struct sockaddr_in ep_ip;
@@ -115,7 +115,7 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
 
                         int rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
 
-                        //i++;
+                        i++;
                     });
                 }
             }
