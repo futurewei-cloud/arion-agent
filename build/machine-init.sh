@@ -34,6 +34,7 @@ echo "1--- installing common dependencies ---" && \
     libelf-dev \    #for libelf.a
     linux-tools-4.15.0-158-generic \         #for bpftool
     linux-cloud-tools-4.15.0-158-generic \   #for bpftool
+    libsqlite3-dev \                         #for sqlite3 lib
     doxygen \
     zlib1g-dev \
     libssl-dev \
@@ -120,4 +121,20 @@ echo "5--- installing ebpf dependencies ---" && \
     git clone https://github.com/futurewei-cloud/zeta && \
     cd zeta && \
     ./build.sh && \
+    cd ~
+
+echo "6--- installing sqlite3 database ---" && \
+    wget https://www.sqlite.org/2022/sqlite-autoconf-3390200.tar.gz && \
+    tar xvfz ./sqlite-autoconf-3390200.tar.gz && \
+    cd ./sqlite-autoconf-3390200 && \
+    ./configure --prefix=/usr/local && \
+    make && \
+    make install && \
+    cd ~
+
+echo "7--- installing sqlite orm lib dependencies ---" && \
+    git clone https://github.com/fnc12/sqlite_orm.git sqlite_orm && \
+    cd sqlite_orm && \
+    cmake -B build && \
+    cmake --build build --target install && \
     cd ~

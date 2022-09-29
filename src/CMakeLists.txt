@@ -31,11 +31,15 @@ message(STATUS "Using gRPC ${gRPC_VERSION}")
 set(_GRPC_GRPCPP_UNSECURE gRPC::grpc++_unsecure)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
 
+# Find sqlite3 orm lib installation
+find_package(SqliteOrm REQUIRED)
+
 add_library(ArionAgentLib STATIC ${SOURCES})
 #target_link_libraries(ArionAgentLib event)
 target_link_libraries(ArionAgentLib ssl)
 target_link_libraries(ArionAgentLib crypto)
 target_link_libraries(ArionAgentLib rt)
+target_link_libraries(ArionAgentLib sqlite_orm::sqlite_orm)
 
 add_executable(ArionAgent main.cpp)
 target_link_libraries(ArionAgent ArionAgentLib)
