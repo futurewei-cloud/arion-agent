@@ -23,5 +23,3 @@ echo "--- prepare dependencies ---"
 
 echo "--- building arion-agent ---"
 cmake . && make
-
-fi

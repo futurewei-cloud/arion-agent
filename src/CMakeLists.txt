@@ -9,7 +9,7 @@ set(SOURCES
 link_libraries(/usr/lib/x86_64-linux-gnu/libevent_pthreads.so)
 link_libraries(/usr/lib/x86_64-linux-gnu/libpthread.so)
 link_libraries(/var/local/git/marl/marl/build/libmarl.a)             #this was built by machine-init.sh
-link_libraries(/var/local/git/zeta/src/extern/libbpf/src/libbpf.a)   #this was built by machine-init.sh
+link_libraries(/var/local/git/zeta/src/extern/libbpf/src/build/libbpf.a)   #this was built by machine-init.sh
 link_libraries(/usr/lib/x86_64-linux-gnu/libelf.a)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/proto3)
