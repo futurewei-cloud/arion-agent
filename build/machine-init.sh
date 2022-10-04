@@ -133,6 +133,7 @@ echo "6--- installing sqlite3 database ---" && \
     cd ~
 
 echo "7--- installing sqlite orm lib dependencies ---" && \
+    cd /var/local/git && \
     git clone https://github.com/fnc12/sqlite_orm.git sqlite_orm && \
     cd sqlite_orm && \
     cmake -B build && \

@@ -16,6 +16,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/proto3)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/grpc)
 include_directories(/var/local/git/marl/marl/include)
 include_directories(/var/local/git/zeta/src/extern/libbpf/src) #libbpf.h
+include_directories(/usr/local/include/sqlite_orm) #sqlite_orm.h
 
 # Find Protobuf installation
 # Looks for protobuf-config.cmake file installed by Protobuf's cmake installation.

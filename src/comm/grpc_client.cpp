@@ -149,7 +149,8 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
 
     fd_neighbor_ebpf_map = bpf_obj_get(table_name_neighbor_ebpf_map.c_str());
     if (fd_neighbor_ebpf_map < 0) {
-        printf("Failed to get xdp neighbor endpoint map fd\n");
+        printf("Failed to get xdp neighbor endpoint map fd, exiting\n");
+        return;
     } else {
         printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
     }

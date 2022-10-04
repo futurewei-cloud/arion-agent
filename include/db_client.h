@@ -1,4 +1,3 @@
-// MIT License
 // Copyright(c) 2022 Futurewei Cloud
 //
 //     Permission is hereby granted,
@@ -13,52 +12,33 @@
 //     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <iostream>
+#include <memory>
 #include <mutex>
 
-#include <grpcpp/grpcpp.h>
-#include <grpc/support/log.h>
-#include <grpcpp/server.h>
-#include <grpcpp/server_builder.h>
-#include <grpcpp/server_context.h>
-#include "arionmaster.grpc.pb.h"
 #include <sqlite_orm.h>
-#include "bpf.h"
-#include "libbpf.h"
 
-using namespace arion::schema;
-using grpc::Status;
+struct Neighbor {
+    std::string vni;
+    std::string vpc_ip;
+    std::string host_ip;
+    std::string vpc_mac;
+    std::string host_mac;
+    int version;
+}; // local db table 1 - neighbor info table that stores neighbors received from ArionMaster
 
-class ArionMasterWatcherImpl final : public Watch::Service {
+struct ProgrammingState {
+    int version;
+    bool cont_tail;
+}; // local db table 2 - neighbor ebpf programming state with version
+
+
+class DbHandler {
 public:
-    std::shared_ptr<grpc_impl::Channel> chan_;
+    void Initialize();
 
-    std::unique_ptr<Watch::Stub> stub_;
-
-    explicit ArionMasterWatcherImpl() {}
-
-    void RequestNeighborRules(ArionWingRequest *request, grpc::CompletionQueue *cq);
-
-    void ConnectToArionMaster();
-
-    void RunClient(std::string ip, std::string port, std::string group, std::string table);
-
-    bool a = chan_ == nullptr;
 
 private:
-    std::string server_address;
+    std::string db_path;
 
-    std::string server_port;
-
-    std::string group_id;
-
-    std::string table_name_neighbor_ebpf_map;
-
-    int fd_neighbor_ebpf_map = -1;
-};
-
-struct AsyncClientCall {
-    arion::schema::NeighborRule reply;
-    grpc::ClientContext context;
-    grpc::Status status;
-    std::unique_ptr<grpc::ClientAsyncReaderWriter<ArionWingRequest, NeighborRule> > stream;
+    std::mutex lock_db;
 };
