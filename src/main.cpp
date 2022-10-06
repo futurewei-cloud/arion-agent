@@ -12,7 +12,6 @@
 //     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 //     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#include "db_client.h"
 #include "grpc_client.h"
 
 #include <thread>
@@ -43,7 +42,6 @@ string g_arion_master_port = "9090";
 string g_arion_neighbor_table = "/sys/fs/bpf/endpoints_map";
 //TODO: let ArionMaster figure out group from ArionWing IP (in grpc channel)
 string g_arion_group = "group1";
-string g_local_db_path = "/var/local/arion/arion_wing.db";
 
 // total time for goal state update in microseconds
 std::atomic_ulong g_total_update_neighbor_time(0);
@@ -134,25 +132,6 @@ int main(int argc, char *argv[]) {
     marl::Scheduler task_scheduler(cfg_bind_hw_cores);
     task_scheduler.bind();
     defer(task_scheduler.unbind());
-
-    // Create (or get an handle of) local db
-    auto local_db = sqlite_orm::make_storage(g_local_db_path,
-                                             sqlite_orm::make_table("neighbor",
-                                                                    sqlite_orm::make_column("vni", &Neighbor::vni),
-                                                                    sqlite_orm::make_column("vpc_ip", &Neighbor::vpc_ip),
-                                                                    sqlite_orm::make_column("host_ip", &Neighbor::host_ip),
-                                                                    sqlite_orm::make_column("vpc_mac", &Neighbor::vpc_mac),
-                                                                    sqlite_orm::make_column("host_mac", &Neighbor::host_mac),
-                                                                    sqlite_orm::make_column("version", &Neighbor::version),
-                                                                    sqlite_orm::primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
-                                                                    ),
-                                             sqlite_orm::make_table("journal",
-                                                                    sqlite_orm::make_column("version", &ProgrammingState::version),
-                                                                    sqlite_orm::make_column("cont_tail", &ProgrammingState::cont_tail),
-                                                                    sqlite_orm::primary_key(&ProgrammingState::version)
-                                                                    )
-                                             );
-    local_db.sync_schema();
 
     // Create a separate thread to run the grpc client of List & Watch Arion Master (first sync from a known revision, and then watch for future updates)
     g_grpc_client = new ArionMasterWatcherImpl();

@@ -14,11 +14,11 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-
 #include <sqlite_orm.h>
+#include "dispatch_queue.h"
 
 struct Neighbor {
-    std::string vni;
+    int vni;
     std::string vpc_ip;
     std::string host_ip;
     std::string vpc_mac;
@@ -28,17 +28,26 @@ struct Neighbor {
 
 struct ProgrammingState {
     int version;
-    bool cont_tail;
 }; // local db table 2 - neighbor ebpf programming state with version
 
+std::string g_local_db_path = "/var/local/arion/arion_wing.db";
 
-class DbHandler {
-public:
-    void Initialize();
+// Schema definition (create DB if not exists) or retrieved handle (get DB if exists already) of local db
+auto local_db = sqlite_orm::make_storage(g_local_db_path,
+                                         sqlite_orm::make_table("neighbor",
+                                                                sqlite_orm::make_column("vni", &Neighbor::vni),
+                                                                sqlite_orm::make_column("vpc_ip", &Neighbor::vpc_ip),
+                                                                sqlite_orm::make_column("host_ip", &Neighbor::host_ip),
+                                                                sqlite_orm::make_column("vpc_mac", &Neighbor::vpc_mac),
+                                                                sqlite_orm::make_column("host_mac", &Neighbor::host_mac),
+                                                                sqlite_orm::make_column("version", &Neighbor::version),
+                                                                sqlite_orm::primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
+                                         ),
+                                         sqlite_orm::make_table("journal",
+                                                                sqlite_orm::make_column("version", &ProgrammingState::version),
+                                                                sqlite_orm::primary_key(&ProgrammingState::version)
+                                         )
+);
 
-
-private:
-    std::string db_path;
-
-    std::mutex lock_db;
-};
+// Create local db writer single thread execution queue
+dispatch_queue local_db_writer_queue("Local db background write queue", 1);

@@ -29,12 +29,12 @@ echo "1--- installing common dependencies ---" && \
     g++ \
     unzip \
     cmake \
-    clang-9 \
     llvm-9 \
+    libfmt-dev \
     libelf-dev \    #for libelf.a
-    linux-tools-4.15.0-158-generic \         #for bpftool
-    linux-cloud-tools-4.15.0-158-generic \   #for bpftool
-    libsqlite3-dev \                         #for sqlite3 lib
+    linux-tools-generic \         #for bpftool
+    linux-cloud-tools-generic \   #for bpftool
+    libsqlite3-dev \              #for sqlite3 lib
     doxygen \
     zlib1g-dev \
     libssl-dev \
@@ -57,7 +57,16 @@ echo "1--- installing common dependencies ---" && \
     pkg-config \
     libtool \
     wget \
-    uuid-dev
+    uuid-dev \
+    libgoogle-glog-dev \
+    libevent \
+    libtool \
+    lz4 \
+    lzma \
+    openssl \
+    snappy \
+    xz \
+    zlib
 pip3 install httpserver netaddr
 
 echo "2--- installing grpc dependencies ---" && \
@@ -137,5 +146,25 @@ echo "7--- installing sqlite orm lib dependencies ---" && \
     git clone https://github.com/fnc12/sqlite_orm.git sqlite_orm && \
     cd sqlite_orm && \
     cmake -B build && \
-    cmake --build build --target install && \
+    sudo cmake --build build --target install && \
+    cd ~
+
+echo "8--- installing double conversion for folly ---" && \
+    cd /var/local/git && \
+    git clone https://github.com/google/double-conversion.git && \
+    cd double-conversion && \
+    cmake -DBUILD_SHARED_LIBS=ON . && \
+    make && \
+    sudo make install && \
+    cd ~
+
+echo "9--- installing folly lib for concurrent hashmap ---" && \
+    cd /var/local/git && \
+    git clone https://github.com/facebook/folly.git && \
+    cd folly && \
+    mkdir _build && \
+    cd _build && \
+    cmake .. && \
+    make && \
+    sudo make install && \
     cd ~

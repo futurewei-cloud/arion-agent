@@ -22,6 +22,7 @@
 #include <grpcpp/server_context.h>
 #include "arionmaster.grpc.pb.h"
 #include <sqlite_orm.h>
+#include <concurrency/ConcurrentHashMap.h>
 #include "bpf.h"
 #include "libbpf.h"
 
@@ -54,6 +55,9 @@ private:
     std::string table_name_neighbor_ebpf_map;
 
     int fd_neighbor_ebpf_map = -1;
+
+    // key std::string is '<vni>-<vpc_ip>', value is inserted version of this neighbor
+    folly::ConcurrentHashMap<std::string, int> neighbor_task_map;
 };
 
 struct AsyncClientCall {
