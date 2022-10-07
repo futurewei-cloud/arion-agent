@@ -2,7 +2,7 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../build/bin)
 
 set(SOURCES
     ./comm/grpc_client.cpp
-    )
+        comm/af_xdp_user.cpp ../include/af_xdp_user.h)
 
 #FIND_LIBRARY(LIBUUID_LIBRARIES uuid)
 #link_libraries(/usr/lib/x86_64-linux-gnu/libuuid.so)
@@ -16,6 +16,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/proto3)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/grpc)
 include_directories(/var/local/git/marl/marl/include)
 include_directories(/var/local/git/zeta/src/extern/libbpf/src) #libbpf.h
+include_directories(/var/local/git/xdp-tutorial/common)
 
 # Find Protobuf installation
 # Looks for protobuf-config.cmake file installed by Protobuf's cmake installation.
