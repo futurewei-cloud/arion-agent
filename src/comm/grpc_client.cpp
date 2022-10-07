@@ -224,11 +224,14 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
     // Create (if db not exists) or connect (if db exists already) to local db
     local_db.sync_schema();
 
+    // Find lkg version to reconcile/sync from server
+    int rev_lkg = FindLKGVersion();
+    printf("Found last known good version: %d from local db to sync from server\n", rev_lkg);
+
     this->ConnectToArionMaster();
-    // TODO: read from db and starting watcher from last known good revision
     grpc::CompletionQueue cq;
     ArionWingRequest watch_req;
     watch_req.set_group(group_id);
-    watch_req.set_rev(1);
+    watch_req.set_rev(rev_lkg);
     this->RequestNeighborRules(&watch_req, &cq);
 }
