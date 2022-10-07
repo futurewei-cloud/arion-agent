@@ -46,6 +46,10 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
     grpc::ClientContext ctx;
     arion::schema::NeighborRule reply;
 
+    // prepared statements for better performance of db writing in completion queue
+    auto add_or_update_neighbor_db_stmt = local_db.prepare(replace(Neighbor{ 0, "", "", "", "", 0 }));
+    auto add_programmed_version_db_stmt = local_db.prepare(insert(ProgrammingState{ 0 }));
+
     // check current grpc channel state, try to connect if needed
     grpc_connectivity_state current_state = chan_->GetState(true);
     if (current_state == grpc_connectivity_state::GRPC_CHANNEL_SHUTDOWN ||
@@ -90,7 +94,8 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
 
                 // non-empty rule
                 if ("" != vpc_ip) {
-                    marl::schedule([this, &i, vni, vpc_ip, vpc_mac, host_ip, host_mac, ver, fd] {
+                    marl::schedule([this, &i, vni, vpc_ip, vpc_mac, host_ip, host_mac, ver, fd,
+                                    &add_or_update_neighbor_db_stmt, &add_programmed_version_db_stmt] {
                         // step #1 - check and store <neighbor_key, version> as <k, v> in concurrent hash map
                         std::string neighbor_key = std::to_string(vni) + "-" + vpc_ip;
 
@@ -159,21 +164,23 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                 int ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
 
                                 // step #3 - async call to write/update to local db table 1
-                                local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver] {
-                                    local_db.replace(Neighbor{ vni, vpc_ip, host_ip, vpc_mac,
-                                                               host_mac, ver });
+                                local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
+                                    get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
+                                    local_db.execute(add_or_update_neighbor_db_stmt);
                                 });
 
                                 // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
                                 if (0 == ebpf_rc) {
-                                    local_db_writer_queue.dispatch([ver] {
-                                            local_db.insert(ProgrammingState{ ver });
+                                    local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
+                                        get<0>(add_programmed_version_db_stmt) = { ver };
+                                        local_db.execute(add_programmed_version_db_stmt);
                                     });
                                 }
                             } else {
                                 // step #4 (case 2) - always write to local db table 2 (programming journal) when version intended ignored (no need to program older version)
-                                local_db_writer_queue.dispatch([ver] {
-                                    local_db.insert(ProgrammingState{ ver });
+                                local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
+                                    get<0>(add_programmed_version_db_stmt) = { ver };
+                                    local_db.execute(add_programmed_version_db_stmt);
                                 });
                             }
                         } else {
