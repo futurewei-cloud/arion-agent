@@ -19,6 +19,7 @@
 #include <unistd.h> /* for getopt */
 #include <grpcpp/grpcpp.h>
 #include <cmath>
+#include <sqlite_orm.h>
 
 #include "marl/defer.h"
 #include "marl/event.h"
@@ -39,7 +40,7 @@ ArionMasterWatcherImpl *g_grpc_client = NULL;
 string g_arion_master_address = EMPTY_STRING;
 string g_arion_master_port = "9090";
 string g_arion_neighbor_table = "/sys/fs/bpf/endpoints_map";
-//TODO: read from goalstate
+//TODO: let ArionMaster figure out group from ArionWing IP (in grpc channel)
 string g_arion_group = "group1";
 
 // total time for goal state update in microseconds
@@ -99,24 +100,28 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    while ((option = getopt(argc, argv, "a:p:d")) != -1) {
+    while ((option = getopt(argc, argv, "a:p:g:d:")) != -1) {
         switch (option) {
-            case 'a':
-                g_arion_master_address = optarg;
-                break;
-            case 'p':
-                g_arion_master_port = optarg;
-                break;
-            case 'd':
-                g_debug_mode = true;
-                break;
-            default: //the '?' case when the option is not recognized
-                printf("Usage: %s\n"
-                       "\t\t[-a Arion Master Server IP Address]\n"
-                       "\t\t[-p Arion Master Server Port]\n"
-                       "\t\t[-d Enable debug mode]\n",
-                       argv[0]);
-                exit(EXIT_FAILURE);
+        case 'a':
+            g_arion_master_address = optarg;
+            break;
+        case 'p':
+            g_arion_master_port = optarg;
+            break;
+        case 'g':
+            g_arion_group = optarg;
+            break;
+        case 'd':
+            g_debug_mode = true;
+            break;
+        default: //the '?' case when the option is not recognized
+            printf("Usage: %s\n"
+                   "\t\t[-a Arion Master Server IP Address]\n"
+                   "\t\t[-p Arion Master Server Port]\n"
+                   "\t\t[-g Arion Wing Group Id]\n"
+                   "\t\t[-d Enable debug mode]\n",
+                   argv[0]);
+            exit(EXIT_FAILURE);
         }
     }
 
@@ -128,7 +133,7 @@ int main(int argc, char *argv[]) {
     task_scheduler.bind();
     defer(task_scheduler.unbind());
 
-    // Create a separate thread to run the grpc client of watching Arion Master
+    // Create a separate thread to run the grpc client of List & Watch Arion Master (first sync from a known revision, and then watch for future updates)
     g_grpc_client = new ArionMasterWatcherImpl();
     marl::schedule([=] {
         g_grpc_client->RunClient(g_arion_master_address,
