@@ -124,3 +124,13 @@ echo "5--- installing ebpf dependencies ---" && \
     mkdir build root && \
     BUILD_STATIC_ONLY=y OBJDIR=build DESTDIR=root make install && \
     cd ~
+
+echo "6--- downloading xdp-project files"
+    cd /var/local/git && \
+    git clone https://github.com/xdp-project/xdp-tutorial&& \
+#    cd xdp-tutorial && \
+#    git submodule update --init --recursive && \
+#    cd src/extern/libbpf/src && \
+#    mkdir build root && \
+#    BUILD_STATIC_ONLY=y OBJDIR=build DESTDIR=root make install && \
+    cd ~
