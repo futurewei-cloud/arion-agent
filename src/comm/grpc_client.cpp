@@ -98,7 +98,7 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                         bool map_updated = false;
                         int update_ct = 0, max_update_ct = 5;
 
-                        while (!map_updated || (update_ct < max_update_ct)) {
+                        while (!map_updated && (update_ct < max_update_ct)) {
                             auto neighbor_pos = neighbor_task_map.find(neighbor_key);
                             if (neighbor_pos == neighbor_task_map.end()) {
                                 // key not found, try insert. The function returns successful only when key not exists when inserting
