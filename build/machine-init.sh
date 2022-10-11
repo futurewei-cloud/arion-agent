@@ -152,7 +152,16 @@ echo "7--- installing sqlite orm lib dependencies ---" && \
     sudo cmake --build build --target install && \
     cd ~
 
-echo "8--- installing double conversion for folly ---" && \
+echo "8--- installing glog for folly ---" && \
+    cd /var/local/git && \
+    git clone https://github.com/google/glog.git && \
+    cd glog && \
+    sudo cmake -S . -B build -G "Unix Makefiles" && \
+    sudo cmake --build build && \
+    sudo cmake --build build --target install && \
+    cd ~
+
+echo "9--- installing double conversion for folly ---" && \
     cd /var/local/git && \
     git clone https://github.com/google/double-conversion.git && \
     cd double-conversion && \
@@ -161,7 +170,7 @@ echo "8--- installing double conversion for folly ---" && \
     sudo make install && \
     cd ~
 
-echo "9--- installing folly lib for concurrent hashmap ---" && \
+echo "10--- installing folly lib for concurrent hashmap ---" && \
     cd /var/local/git && \
     git clone https://github.com/facebook/folly.git && \
     cd folly && \
@@ -172,7 +181,7 @@ echo "9--- installing folly lib for concurrent hashmap ---" && \
     sudo make install && \
     cd ~
 
-echo "6--- downloading xdp-project files"
+echo "11--- downloading xdp-project files"
     cd /var/local/git && \
     git clone https://github.com/xdp-project/xdp-tutorial&& \
 #    cd xdp-tutorial && \
