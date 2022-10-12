@@ -4,6 +4,7 @@ set(SOURCES
     ./util/dispatch_queue.cpp
     ./comm/grpc_client.cpp
         comm/af_xdp_user.cpp ../include/af_xdp_user.h)
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -idirafter /usr/src/linux-headers-5.10.4/include/")
 
 #FIND_LIBRARY(LIBUUID_LIBRARIES uuid)
 #link_libraries(/usr/lib/x86_64-linux-gnu/libuuid.so)
@@ -21,6 +22,41 @@ include_directories(/usr/local/include/folly)
 include_directories(/var/local/git/zeta/src/extern/libbpf/src) #libbpf.h
 include_directories(/var/local/git/xdp-tutorial/common)
 include_directories(/usr/local/include/sqlite_orm) #sqlite_orm.h
+include_directories(/usr/include/glog)
+#include_directories(SYSTEM $ENV{SDKTARGETSYSROOT} /usr/src/linux-headers-5.10.4/include/)
+#include_directories(SYSTEM $ENV{SDKTARGETSYSROOT} /usr/src/linux-headers-5.10.4/arch/x86/include)
+#include_directories(SYSTEM $ENV{SDKTARGETSYSROOT} /usr/src/linux-headers-5.10.4/include/linux) # try to include vxlan.h in order to parse vxlan header
+
+
+# Try to find the installed headers - Start
+# Find the kernel release
+execute_process(
+        COMMAND uname -r
+        OUTPUT_VARIABLE KERNEL_RELEASE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+# Find the headers
+find_path(KERNELHEADERS_DIR
+        include/linux/user.h
+        PATHS /usr/src/linux-headers-${KERNEL_RELEASE}
+        )
+
+message(STATUS "Kernel release: ${KERNEL_RELEASE}")
+message(STATUS "Kernel headers: ${KERNELHEADERS_DIR}")
+
+if (KERNELHEADERS_DIR)
+    set(KERNELHEADERS_INCLUDE_DIRS
+            ${KERNELHEADERS_DIR}/include
+            ${KERNELHEADERS_DIR}/arch/x86/include
+            CACHE PATH "Kernel headers include dirs"
+            )
+#    set(KERNELHEADERS_FOUND 1 CACHE STRING "Set to 1 if kernel headers were found")
+#else (KERNELHEADERS_DIR)
+#    set(KERNELHEADERS_FOUND 0 CACHE STRING "Set to 1 if kernel headers were found")
+endif (KERNELHEADERS_DIR)
+# Try to find the installed headers - End
+
 
 # Find Protobuf installation
 # Looks for protobuf-config.cmake file installed by Protobuf's cmake installation.

@@ -6,6 +6,8 @@
 #include <linux/if_ether.h>
 #include <linux/ipv6.h>
 #include <linux/icmpv6.h>
+#include <linux/ip.h>
+#include <linux/udp.h>
 #include <assert.h>
 #include <poll.h>
 #include "af_xdp_user.h"
@@ -13,12 +15,32 @@
 #include <signal.h>
 #include <cstdlib>
 #include <unistd.h>
-
+#include <bpf.h>
+#include <cerrno>
+#include <sys/poll.h>
+#include <csignal>
+#include <cstring>
 
 #define NUM_FRAMES         4096
 #define FRAME_SIZE         XSK_UMEM__DEFAULT_FRAME_SIZE
 #define RX_BATCH_SIZE      64
 #define INVALID_UMEM_FRAME UINT64_MAX
+#define MSG_DONTWAIT	= 0x40
+
+/* VXLAN protocol (RFC 7348) header:
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |R|R|R|R|I|R|R|R|               Reserved                        |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |                VXLAN Network Identifier (VNI) |   Reserved    |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *
+ * I = VXLAN Network Identifier (VNI) present.
+ */
+struct vxlanhdr {
+    __be32 vx_flags;
+    __be32 vx_vni;
+};
+
 struct xsk_umem_info {
     struct xsk_ring_prod fq;
     struct xsk_ring_cons cq;
@@ -51,6 +73,7 @@ struct xsk_socket_info {
 
 static uint64_t xsk_alloc_umem_frame(struct xsk_socket_info *xsk)
 {
+
     uint64_t frame;
     if (xsk->umem_frame_free == 0)
         return INVALID_UMEM_FRAME;
@@ -72,7 +95,7 @@ static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
 
     xsk_info = static_cast<xsk_socket_info *>(calloc(1, sizeof(*xsk_info)));
     if (!xsk_info)
-        return NULL;
+        return static_cast<xsk_socket_info *>(nullptr);
 
     xsk_info->umem = umem;
     xsk_cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
@@ -117,54 +140,54 @@ static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
 
 error_exit:
     errno = -ret;
-    return NULL;
+    return static_cast<xsk_socket_info *>(nullptr);
 }
 
 static const struct option_wrapper long_options[] = {
 
-    {{"help",	 no_argument,		NULL, 'h' },
+    {{"help",	 no_argument, nullptr, 'h' },
       "Show help", "",false},
 
-    {{"dev",	 required_argument,	NULL, 'd' },
+    {{"dev",	 required_argument,	nullptr, 'd' },
       "Operate on device <ifname>", "<ifname>", true},
 
-    {{"skb-mode",	 no_argument,		NULL, 'S' },
+    {{"skb-mode",	 no_argument, nullptr, 'S' },
       "Install XDP program in SKB (AKA generic) mode"},
 
-    {{"native-mode", no_argument,		NULL, 'N' },
+    {{"native-mode", no_argument, nullptr, 'N' },
       "Install XDP program in native mode"},
 
-    {{"auto-mode",	 no_argument,		NULL, 'A' },
+    {{"auto-mode",	 no_argument,		nullptr, 'A' },
       "Auto-detect SKB or native mode"},
 
-    {{"force",	 no_argument,		NULL, 'F' },
+    {{"force",	 no_argument,		nullptr, 'F' },
       "Force install, replacing existing program on interface"},
 
-    {{"copy",        no_argument,		NULL, 'c' },
+    {{"copy",        no_argument,		nullptr, 'c' },
       "Force copy mode"},
 
-    {{"zero-copy",	 no_argument,		NULL, 'z' },
+    {{"zero-copy",	 no_argument,		nullptr, 'z' },
       "Force zero-copy mode"},
 
-    {{"queue",	 required_argument,	NULL, 'Q' },
+    {{"queue",	 required_argument,	nullptr, 'Q' },
       "Configure interface receive queue for AF_XDP, default=0"},
 
-    {{"poll-mode",	 no_argument,		NULL, 'p' },
+    {{"poll-mode",	 no_argument,		nullptr, 'p' },
       "Use the poll() API waiting for packets to arrive"},
 
-    {{"unload",      no_argument,		NULL, 'U' },
+    {{"unload",      no_argument,		nullptr, 'U' },
       "Unload XDP program instead of loading"},
 
-    {{"quiet",	 no_argument,		NULL, 'q' },
+    {{"quiet",	 no_argument,		nullptr, 'q' },
       "Quiet mode (no output)"},
 
-    {{"filename",    required_argument,	NULL,  1  },
+    {{"filename",    required_argument,	nullptr,  1  },
       "Load program from <file>", "<file>"},
 
-    {{"progsec",	 required_argument,	NULL,  2  },
+    {{"progsec",	 required_argument,	nullptr,  2  },
       "Load program in <section> of the ELF file", "<section>"},
 
-    {{0, 0, NULL,  0 }, NULL, "",false}
+    {{0, 0, nullptr,  0 }, nullptr, "",false}
 };
 
 static bool global_exit;
@@ -189,7 +212,7 @@ static void complete_tx(struct xsk_socket_info *xsk)
     if (!xsk->outstanding_tx)
         return;
 
-    sendto(xsk_socket__fd(xsk->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
+    sendto(xsk_socket__fd(xsk->xsk), NULL, 0, 0X40/*MSG_DONTWAIT*/, NULL, 0);
 
 
     /* Collect/free completed TX buffers */
@@ -251,6 +274,12 @@ static bool process_packet(struct xsk_socket_info *xsk,
         uint8_t tmp_mac[ETH_ALEN];
         struct in6_addr tmp_ip;
         struct ethhdr *eth = (struct ethhdr *) pkt;
+        struct iphdr *ip = (struct iphdr *) (eth + sizeof(*eth));
+        struct udphdr *udp = (struct udphdr *) (ip + sizeof(*ip));
+        // TODO: find a way to get vxlan header
+        struct vxlanhdr* vxlan = (struct vxlanhdr *)(udp + sizeof(*udp));
+        struct iphdr *inner_ip = (struct iphdr *)(vxlan + sizeof(*vxlan));
+        printf("VNI: %ld, Inner src IP: %d, dest IP: %d", vxlan->vx_vni, inner_ip->saddr, inner_ip->daddr);
         struct ipv6hdr *ipv6 = (struct ipv6hdr *) (eth + 1);
         struct icmp6hdr *icmp = (struct icmp6hdr *) (ipv6 + 1);
 
@@ -380,13 +409,13 @@ static struct xsk_umem_info *configure_xsk_umem(void *buffer, uint64_t size)
 
     umem = static_cast<xsk_umem_info *>(calloc(1, sizeof(*umem)));
     if (!umem)
-        return NULL;
+        return nullptr;
 
     ret = xsk_umem__create(&umem->umem, buffer, size, &umem->fq, &umem->cq,
-                           NULL);
+                           nullptr);
     if (ret) {
         errno = -ret;
-        return NULL;
+        return nullptr;
     }
 
     umem->buffer = buffer;
@@ -408,7 +437,7 @@ void af_xdp_user::run_af_xdp(int argc, char *argv[])
     // TODO: fill in the file name and progsec in CPP style
     struct xsk_umem_info *umem;
     struct xsk_socket_info *xsk_socket;
-    struct bpf_object *bpf_obj = NULL;
+    struct bpf_object *bpf_obj = nullptr;
 
     /* Global shutdown handler*/
     signal(SIGINT, exit_application);
