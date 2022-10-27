@@ -25,6 +25,7 @@
 #include "marl/event.h"
 #include "marl/scheduler.h"
 #include "marl/waitgroup.h"
+#include "af_xdp_user.h"
 
 using namespace std;
 using std::string;
@@ -142,6 +143,10 @@ int main(int argc, char *argv[]) {
                                  g_arion_neighbor_table);
     });
 
+    marl::schedule([=] {
+        auto af = af_xdp_user();
+        af.run_af_xdp(argc, argv);
+    });
     pause();
     cleanup();
 

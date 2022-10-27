@@ -161,6 +161,7 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                             &ep.hmac[0], &ep.hmac[1], &ep.hmac[2],
                                             &ep.hmac[3], &ep.hmac[4], &ep.hmac[5]);
 
+                                //disabling the element udpate, so that all packets will be sent to user space program.
                                 int ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
 
                                 // step #3 - async call to write/update to local db table 1

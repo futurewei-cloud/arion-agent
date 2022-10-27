@@ -9,11 +9,14 @@
 #include <bpf.h>
 #include <xsk.h>
 #include <errno.h>
-
+#ifdef __cplusplus
+extern "C"
+{
 #include "common_params.h"
 #include "common_user_bpf_xdp.h"
 #include "common_libbpf.h"
-
+}
+#endif
 static const char *__doc__ = "AF_XDP kernel bypass example\n";
 
 class af_xdp_user {

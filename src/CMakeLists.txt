@@ -3,7 +3,8 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../build/bin)
 set(SOURCES
     ./util/dispatch_queue.cpp
     ./comm/grpc_client.cpp
-        comm/af_xdp_user.cpp ../include/af_xdp_user.h)
+        comm/af_xdp_user.cpp
+        )
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -idirafter /usr/src/linux-headers-5.10.4/include/")
 
 #FIND_LIBRARY(LIBUUID_LIBRARIES uuid)
@@ -82,6 +83,8 @@ find_package(GLog REQUIRED)
 find_package(fmt REQUIRED)
 
 add_library(ArionAgentLib STATIC ${SOURCES})
+target_include_directories(ArionAgentLib PUBLIC /var/local/git/xdp-tutorial/common)
+target_link_directories(ArionAgentLib PUBLIC /var/local/git/xdp-tutorial/common)
 #target_link_libraries(ArionAgentLib event)
 target_link_libraries(ArionAgentLib ssl)
 target_link_libraries(ArionAgentLib crypto)
