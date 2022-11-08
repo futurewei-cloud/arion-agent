@@ -99,11 +99,37 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                         // step #1 - check and store <neighbor_key, version> as <k, v> in concurrent hash map
                         std::string neighbor_key = std::to_string(vni) + "-" + vpc_ip;
 
+                        // ebpf programming metadata
+                        endpoint_key_t epkey;
+                        epkey.vni = vni;
+                        struct sockaddr_in ep_ip;
+                        inet_pton(AF_INET, vpc_ip.c_str(), &(ep_ip.sin_addr));
+                        epkey.ip = ep_ip.sin_addr.s_addr;
+
+                        endpoint_t ep;
+                        struct sockaddr_in ep_hip;
+                        inet_pton(AF_INET, host_ip.c_str(), &(ep_hip.sin_addr));
+                        ep.hip = ep_hip.sin_addr.s_addr;
+
+                        std::sscanf(vpc_mac.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                                    &ep.mac[0], &ep.mac[1], &ep.mac[2],
+                                    &ep.mac[3], &ep.mac[4], &ep.mac[5]);
+
+                        std::sscanf(host_mac.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                                    &ep.hmac[0], &ep.hmac[1], &ep.hmac[2],
+                                    &ep.hmac[3], &ep.hmac[4], &ep.hmac[5]);
+
                         bool ebpf_ignored = false;
                         bool map_updated = false;
                         int update_ct = 0, max_update_ct = 5;
+                        int ebpf_rc = -1;
 
                         while (!map_updated && (update_ct < max_update_ct)) {
+                            // lock transaction section
+                            //     segment lock allows some level of concurrent manipulations of concurrent version map
+                            //     as long as the multi-threading version updates' keys are not hashed to the same slot in segment array
+                            segment_lock.lock(neighbor_key);
+
                             auto neighbor_pos = neighbor_task_map.find(neighbor_key);
                             if (neighbor_pos == neighbor_task_map.end()) {
                                 // key not found, try insert. The function returns successful only when key not exists when inserting
@@ -112,6 +138,17 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                 if (res_insert.second) {
                                     // means successfully inserted, done with update
                                     map_updated = true;
+
+                                    // step #2 - sync syscall ebpf map programming with return code
+                                    ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
+                                    if (ebpf_rc < 0) {
+                                        // safely rollback
+                                        //     rollback version, for insertion case let's revert it to 0
+                                        neighbor_task_map.assign(neighbor_key, 0);
+
+                                        //     rollback map status
+                                        map_updated = false;
+                                    }
                                 } // 'else' means another thread already inserted before me, then it's not an insert case and next time in the loop will go to case of update
                             } else {
                                 // key found, means multi neighbor versions might update at the same time
@@ -121,8 +158,19 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                     // only update neighbor version
                                     //   1. when received (from ArionMaster) neighbor version is greater than current version in map
                                     //   2. and only if the element to update is the original element (version in 'find')
-                                    if (neighbor_task_map.assign_if_equal(neighbor_key, ver, cur_ver)) {
+                                    if (neighbor_task_map.assign(neighbor_key, ver)) {
                                         map_updated = true;
+
+                                        // step #2 - sync syscall ebpf map programming with return code
+                                        ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
+                                        if (ebpf_rc < 0) {
+                                            // safely rollback
+                                            //     rollback version
+                                            neighbor_task_map.assign(neighbor_key, cur_ver);
+
+                                            //     rollback map status
+                                            map_updated = false;
+                                        }
                                     }
                                 } else {
                                     // otherwise
@@ -137,32 +185,13 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                             }
 
                             update_ct++;
+
+                            // exit transaction section
+                            segment_lock.unlock(neighbor_key);
                         }
 
                         if (map_updated) {
                             if (!ebpf_ignored) {
-                                // step #2 - sync syscall ebpf map programming with return code
-                                endpoint_key_t epkey;
-                                epkey.vni = vni;
-                                struct sockaddr_in ep_ip;
-                                inet_pton(AF_INET, vpc_ip.c_str(), &(ep_ip.sin_addr));
-                                epkey.ip = ep_ip.sin_addr.s_addr;
-
-                                endpoint_t ep;
-                                struct sockaddr_in ep_hip;
-                                inet_pton(AF_INET, host_ip.c_str(), &(ep_hip.sin_addr));
-                                ep.hip = ep_hip.sin_addr.s_addr;
-
-                                std::sscanf(vpc_mac.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
-                                            &ep.mac[0], &ep.mac[1], &ep.mac[2],
-                                            &ep.mac[3], &ep.mac[4], &ep.mac[5]);
-
-                                std::sscanf(host_mac.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
-                                            &ep.hmac[0], &ep.hmac[1], &ep.hmac[2],
-                                            &ep.hmac[3], &ep.hmac[4], &ep.hmac[5]);
-
-                                int ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
-
                                 // step #3 - async call to write/update to local db table 1
                                 local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
                                     get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
