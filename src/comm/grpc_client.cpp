@@ -37,7 +37,7 @@
 #include "arionmaster.grpc.pb.h"
 #include "db_client.h"
 #include "grpc_client.h"
-#include "xdp/trn_datamodel.h"
+//#include "xdp/trn_datamodel.h"
 
 using namespace arion::schema;
 
@@ -47,8 +47,8 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
     arion::schema::NeighborRule reply;
 
     // prepared statements for better performance of db writing in completion queue
-    auto add_or_update_neighbor_db_stmt = local_db.prepare(replace(Neighbor{ 0, "", "", "", "", 0 }));
-    auto add_programmed_version_db_stmt = local_db.prepare(insert(ProgrammingState{ 0 }));
+    auto add_or_update_neighbor_db_stmt = db_client::get_instance().local_db.prepare(replace(Neighbor{ 0, "", "", "", "", 0 }));
+    auto add_programmed_version_db_stmt = db_client::get_instance().local_db.prepare(insert(ProgrammingState{ 0 }));
 
     // check current grpc channel state, try to connect if needed
     grpc_connectivity_state current_state = chan_->GetState(true);
@@ -166,23 +166,23 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                 int ebpf_rc = 0;//bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
                                 printf("Inserted this neighbor into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni);
                                 // step #3 - async call to write/update to local db table 1
-                                local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
+                                db_client::get_instance().local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
                                     get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
-                                    local_db.execute(add_or_update_neighbor_db_stmt);
+                                    db_client::get_instance().local_db.execute(add_or_update_neighbor_db_stmt);
                                 });
 
                                 // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
                                 if (0 == ebpf_rc) {
-                                    local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
+                                    db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
                                         get<0>(add_programmed_version_db_stmt) = { ver };
-                                        local_db.execute(add_programmed_version_db_stmt);
+                                        db_client::get_instance().local_db.execute(add_programmed_version_db_stmt);
                                     });
                                 }
                             } else {
                                 // step #4 (case 2) - always write to local db table 2 (programming journal) when version intended ignored (no need to program older version)
-                                local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
+                                db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
                                     get<0>(add_programmed_version_db_stmt) = { ver };
-                                    local_db.execute(add_programmed_version_db_stmt);
+                                    db_client::get_instance().local_db.execute(add_programmed_version_db_stmt);
                                 });
                             }
                         } else {
@@ -231,10 +231,10 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
     }
 
     // Create (if db not exists) or connect (if db exists already) to local db
-    local_db.sync_schema();
+    db_client::get_instance().local_db.sync_schema();
 
     // Find lkg version to reconcile/sync from server
-    int rev_lkg = FindLKGVersion();
+    int rev_lkg = db_client::get_instance().FindLKGVersion();
     printf("Found last known good version: %d from local db to sync from server\n", rev_lkg);
 
     this->ConnectToArionMaster();

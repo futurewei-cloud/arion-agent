@@ -11,7 +11,7 @@
 //#include <linux/if_arp.h>
 #include <assert.h>
 #include <poll.h>
-//#include <db_client.h>
+#include <db_client.h>
 //#include <grpc_client.h>
 #include "af_xdp_user.h"
 #include <sys/resource.h>
@@ -505,7 +505,7 @@ static bool process_packet(struct xsk_socket_info *xsk,
         );
         endpoint_key_t epkey;
         endpoint_t ep_value;
-//        ep_value = GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(arp_src_ip));
+        ep_value = db_client::get_instance().GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(arp_src_ip));
         if (ep_value.hip > 0) {
             epkey.vni = trn_get_vni(vxlan->vni);
             struct sockaddr_in ep_ip;
