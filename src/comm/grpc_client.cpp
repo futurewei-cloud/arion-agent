@@ -74,6 +74,7 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
     std::atomic<int> i(tag_watch + 1);
     bool write_done = false;
     while (cq->Next(&got_tag, &ok)) {
+        printf("Read one from grpc stream\n");
         if (ok) {
             if (!write_done) {
                 printf("Completion queue: initial task response received\n");
@@ -98,12 +99,14 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                     &add_or_update_neighbor_db_stmt, &add_programmed_version_db_stmt] {
                         // step #1 - check and store <neighbor_key, version> as <k, v> in concurrent hash map
                         std::string neighbor_key = std::to_string(vni) + "-" + vpc_ip;
-
+                        printf("vpc_ip is NOT empty: [%s]\n", vpc_ip.c_str());
                         bool ebpf_ignored = false;
                         bool map_updated = false;
                         int update_ct = 0, max_update_ct = 5;
 
                         while (!map_updated && (update_ct < max_update_ct)) {
+                            printf("Inside while loop, map_updated = [%b], update_ct = [%ld], max_update_ct = [%ld]\n",
+                                   map_updated, update_ct, max_update_ct);
                             auto neighbor_pos = neighbor_task_map.find(neighbor_key);
                             if (neighbor_pos == neighbor_task_map.end()) {
                                 // key not found, try insert. The function returns successful only when key not exists when inserting
@@ -112,8 +115,10 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                 if (res_insert.second) {
                                     // means successfully inserted, done with update
                                     map_updated = true;
+                                    printf("Found neighbor key in neighbor_task_map\n");
                                 } // 'else' means another thread already inserted before me, then it's not an insert case and next time in the loop will go to case of update
                             } else {
+                                printf("Didn't find neighbor key in neighbor_task_map\n");
                                 // key found, means multi neighbor versions might update at the same time
                                 int cur_ver = neighbor_pos->second;
 
@@ -141,44 +146,50 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
 
                         if (map_updated) {
                             if (!ebpf_ignored) {
+                                printf("ebpf_ignored = false\n");
                                 // step #2 - sync syscall ebpf map programming with return code
                                 endpoint_key_t epkey;
                                 epkey.vni = vni;
                                 struct sockaddr_in ep_ip;
                                 inet_pton(AF_INET, vpc_ip.c_str(), &(ep_ip.sin_addr));
                                 epkey.ip = ep_ip.sin_addr.s_addr;
-
+                                printf("Filled in ep.ip\n");
                                 endpoint_t ep;
                                 struct sockaddr_in ep_hip;
                                 inet_pton(AF_INET, host_ip.c_str(), &(ep_hip.sin_addr));
                                 ep.hip = ep_hip.sin_addr.s_addr;
+                                printf("Filled in ep.hip\n");
 
                                 std::sscanf(vpc_mac.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
                                             &ep.mac[0], &ep.mac[1], &ep.mac[2],
                                             &ep.mac[3], &ep.mac[4], &ep.mac[5]);
+                                printf("Filled in ep.mac\n");
 
                                 std::sscanf(host_mac.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
                                             &ep.hmac[0], &ep.hmac[1], &ep.hmac[2],
                                             &ep.hmac[3], &ep.hmac[4], &ep.hmac[5]);
+                                printf("Filled in ep.hmac\n");
 
                                 //disabling the element udpate, so that all packets will be sent to user space program.
 
                                 int ebpf_rc = 0;//bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
-                                printf("Inserted this neighbor into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni);
+                                printf("GPPC: Inserted this neighbor into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni);
                                 // step #3 - async call to write/update to local db table 1
-                                db_client::get_instance().local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
-                                    get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
-                                    db_client::get_instance().local_db.execute(add_or_update_neighbor_db_stmt);
-                                });
-
+//                                db_client::get_instance().local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
+//                                    get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
+//                                    db_client::get_instance().local_db.execute(add_or_update_neighbor_db_stmt);
+//                                });
+                                printf("Dispatched local db neighbor insert\n");
                                 // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
-                                if (0 == ebpf_rc) {
-                                    db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
-                                        get<0>(add_programmed_version_db_stmt) = { ver };
-                                        db_client::get_instance().local_db.execute(add_programmed_version_db_stmt);
-                                    });
-                                }
+//                                if (0 == ebpf_rc) {
+//                                    db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
+//                                        get<0>(add_programmed_version_db_stmt) = { ver };
+//                                        db_client::get_instance().local_db.execute(add_programmed_version_db_stmt);
+//                                    });
+//                                }
+                                printf("Dispatched local db journal insert\n");
                             } else {
+                                printf("ebpf_ignored = true\n");
                                 // step #4 (case 2) - always write to local db table 2 (programming journal) when version intended ignored (no need to program older version)
                                 db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
                                     get<0>(add_programmed_version_db_stmt) = { ver };
@@ -191,8 +202,12 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
 
                         i++;
                     });
+                } else {
+                    printf("vpc_ip is empty\n");
                 }
             }
+        } else {
+            printf("NOT okay\n");
         }
     }
 }
@@ -223,12 +238,12 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
 
     // Retrieve neighbor's ebpf map fd (handle)
     fd_neighbor_ebpf_map = bpf_obj_get(table_name_neighbor_ebpf_map.c_str());
-    if (fd_neighbor_ebpf_map < 0) {
-        printf("Failed to get xdp neighbor endpoint map fd, exiting\n");
-        return;
-    } else {
-        printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
-    }
+//    if (fd_neighbor_ebpf_map < 0) {
+//        printf("Failed to get xdp neighbor endpoint map fd, exiting\n");
+//        return;
+//    } else {
+//        printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
+//    }
 
     // Create (if db not exists) or connect (if db exists already) to local db
     db_client::get_instance().local_db.sync_schema();

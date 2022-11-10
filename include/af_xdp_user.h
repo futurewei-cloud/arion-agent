@@ -25,7 +25,7 @@ public:
     af_xdp_user() {
         printf("%s", "Start of af_xdp userspace program.");
     }
-    void run_af_xdp(std::string table_name_neighbor_ebpf_map);
+    void run_af_xdp(/*std::string table_name_neighbor_ebpf_map*/);
 private:
 
 };

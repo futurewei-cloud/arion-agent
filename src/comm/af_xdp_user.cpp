@@ -513,7 +513,7 @@ static bool process_packet(struct xsk_socket_info *xsk,
             epkey.ip = ep_ip.sin_addr.s_addr;
             // we now have key and value, can modify the packet and update the map now.
             int ebpf_rc = bpf_map_update_elem((*fd), &epkey, &ep_value, BPF_ANY);
-            printf("Inserted this neighbor into map: vip: %s, vni: %d, ebpf_rc: %d\n",
+            printf("AF_XDP: Inserted this neighbor into map: vip: %s, vni: %d, ebpf_rc: %d\n",
                    inet_ntoa(arp_src_ip), trn_get_vni(vxlan->vni), ebpf_rc);
 //            // TODO: step #3 - async call to write/update to local db table 1
 //            local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
@@ -972,16 +972,17 @@ struct bpf_object *load_bpf_and_xdp_attach(struct config *cfg)
     return bpf_obj;
 }
 
-void af_xdp_user::run_af_xdp(std::string table_name_neighbor_ebpf_map)
+void af_xdp_user::run_af_xdp()
 {
     printf("%s", "af_xdp started\n");
+    std::string table_name_neighbor_ebpf_map = "/sys/fs/bpf/endpoints_map";
     int fd_neighbor_ebpf_map = bpf_obj_get(table_name_neighbor_ebpf_map.c_str());
-    if (fd_neighbor_ebpf_map < 0) {
-        printf("Failed to get xdp neighbor endpoint map fd, exiting\n");
-        return;
-    } else {
-        printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
-    }
+//    if (fd_neighbor_ebpf_map < 0) {
+//        printf("Failed to get xdp neighbor endpoint map fd, exiting\n");
+//        return;
+//    } else {
+//        printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
+//    }
 
     int ret;
     int xsks_map_fd;
