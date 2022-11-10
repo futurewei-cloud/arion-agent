@@ -12,7 +12,7 @@
 //     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 //     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#include "grpc_client.h"
+//#include "grpc_client.h"
 
 #include <thread>
 #include <chrono>
@@ -36,7 +36,7 @@ static char EMPTY_STRING[] = "";
 
 // Global variables
 std::thread *g_grpc_client_thread = NULL;
-ArionMasterWatcherImpl *g_grpc_client = NULL;
+//ArionMasterWatcherImpl *g_grpc_client = NULL;
 
 string g_arion_master_address = EMPTY_STRING;
 string g_arion_master_port = "9090";
@@ -62,16 +62,16 @@ static void cleanup() {
     printf("%s", "Program exiting, cleaning up...\n");
 
     // optional: delete all global objects allocated by libprotobuf.
-    google::protobuf::ShutdownProtobufLibrary();
+//    google::protobuf::ShutdownProtobufLibrary();
 
     // stop the grpc client
-    if (g_grpc_client != NULL) {
-        delete g_grpc_client;
-        g_grpc_client = NULL;
-        printf("%s", "Cleaned up grpc client.\n");
-    } else {
-        printf("%s", "Unable to delete grpc client pointer since it is null.\n");
-    }
+//    if (g_grpc_client != NULL) {
+//        delete g_grpc_client;
+//        g_grpc_client = NULL;
+//        printf("%s", "Cleaned up grpc client.\n");
+//    } else {
+//        printf("%s", "Unable to delete grpc client pointer since it is null.\n");
+//    }
 
     if (g_grpc_client_thread != NULL) {
         delete g_grpc_client_thread;
@@ -98,10 +98,10 @@ int main(int argc, char *argv[]) {
     printf("%s", "Arion Agent started...\n");
 
     // Register input key signal handlers
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+//    signal(SIGINT, signal_handler);
+//    signal(SIGTERM, signal_handler);
 
-    while ((option = getopt(argc, argv, "a:p:g:d:")) != -1) {
+    while ((option = getopt(argc, argv, "a:p:g:d")) != -1) {
         switch (option) {
         case 'a':
             g_arion_master_address = optarg;
@@ -126,6 +126,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    printf("Read arion master IP: [%s], arion master port: [%s], arion group name: [%s]\n",
+           g_arion_master_address.c_str(), g_arion_master_port.c_str(), g_arion_group.c_str());
     // Create marl scheduler using all the logical processors available to the process.
     // Bind this scheduler to the main thread so we can call marl::schedule()
     marl::Scheduler::Config cfg_bind_hw_cores;
@@ -135,17 +137,17 @@ int main(int argc, char *argv[]) {
     defer(task_scheduler.unbind());
 
     // Create a separate thread to run the grpc client of List & Watch Arion Master (first sync from a known revision, and then watch for future updates)
-    g_grpc_client = new ArionMasterWatcherImpl();
-    marl::schedule([=] {
-        g_grpc_client->RunClient(g_arion_master_address,
-                                 g_arion_master_port,
-                                 g_arion_group,
-                                 g_arion_neighbor_table);
-    });
+//    g_grpc_client = new ArionMasterWatcherImpl();
+//    marl::schedule([=] {
+//        g_grpc_client->RunClient(g_arion_master_address,
+//                                 g_arion_master_port,
+//                                 g_arion_group,
+//                                 g_arion_neighbor_table);
+//    });
 
     marl::schedule([=] {
         auto af = af_xdp_user();
-        af.run_af_xdp(argc, argv);
+        af.run_af_xdp(g_arion_neighbor_table);
     });
     pause();
     cleanup();

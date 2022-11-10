@@ -45,6 +45,8 @@ public:
 
     bool a = chan_ == nullptr;
 
+    int fd_neighbor_ebpf_map = -1;
+
 private:
     std::string server_address;
 
@@ -54,7 +56,6 @@ private:
 
     std::string table_name_neighbor_ebpf_map;
 
-    int fd_neighbor_ebpf_map = -1;
 
     // key std::string is '<vni>-<vpc_ip>', value is inserted version of this neighbor
     folly::ConcurrentHashMap<std::string, int> neighbor_task_map;

@@ -16,6 +16,7 @@
 #include <mutex>
 #include <sqlite_orm.h>
 #include "dispatch_queue.h"
+#include "xdp/trn_datamodel.h"
 
 using namespace sqlite_orm;
 
@@ -32,10 +33,10 @@ struct ProgrammingState {
     int version;
 }; // local db table 2 - neighbor ebpf programmed version
 
-std::string g_local_db_path = "/var/local/arion/arion_wing.db";
+static std::string g_local_db_path = "/var/local/arion/arion_wing.db";
 
 // Schema definition (create DB if not exists) or retrieved handle (get DB if exists already) of local db
-auto local_db = make_storage(g_local_db_path,
+static auto local_db = make_storage(g_local_db_path,
                              make_table("neighbor",
                                         make_column("vni", &Neighbor::vni),
                                         make_column("vpc_ip", &Neighbor::vpc_ip),
@@ -52,7 +53,7 @@ auto local_db = make_storage(g_local_db_path,
 );
 
 // Create local db writer single thread execution queue
-dispatch_queue local_db_writer_queue("Local db background write queue", 1);
+static dispatch_queue local_db_writer_queue("Local db background write queue", 1);
 
 static int FindLKGVersion() {
     int lkg_ver = 0;
@@ -88,4 +89,38 @@ static int FindLKGVersion() {
     }
 
     return lkg_ver + 1;
+}
+
+/*  SELECT host_ip, vpc_mac, host_mac
+ *  FROM neighbor
+ *  WHERE vni=%{vni} AND vpc_ip=%{vpc_ip}
+ * */
+static auto query_neighbor_statement =
+        local_db.prepare(select(columns(&Neighbor::host_ip, &Neighbor::vpc_mac, &Neighbor::host_mac),
+                                where(is_equal((&Neighbor::vni), 0) and is_equal((&Neighbor::vpc_ip), "127.0.0.1"))));
+
+static endpoint_t GetNeighbor(int vni, std::string vpc_ip) {
+    endpoint_t found_neighbor;
+    printf("GetNeighbor with VNI: [%d], vpc_ip: [%s]\n", vni, vpc_ip.c_str());
+    get<0>(query_neighbor_statement) = vni;
+    get<1>(query_neighbor_statement) = vpc_ip.c_str();
+    printf("Statement: %s\n", query_neighbor_statement.sql().c_str());
+    auto rows = local_db.execute(query_neighbor_statement);
+    printf("Found %ld rows\n", rows.size());
+    for (auto& row : rows) {
+        struct sockaddr_in ep_hip;
+        inet_pton(AF_INET, get<0>(row).c_str(), &(ep_hip.sin_addr));
+        found_neighbor.hip = ep_hip.sin_addr.s_addr;
+
+        std::sscanf(get<1>(row).c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                    &found_neighbor.mac[0], &found_neighbor.mac[1], &found_neighbor.mac[2],
+                    &found_neighbor.mac[3], &found_neighbor.mac[4], &found_neighbor.mac[5]);
+
+        std::sscanf(get<2>(row).c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                    &found_neighbor.hmac[0], &found_neighbor.hmac[1], &found_neighbor.hmac[2],
+                    &found_neighbor.hmac[3], &found_neighbor.hmac[4], &found_neighbor.hmac[5]);
+
+        printf("host_ip: %s, vpc_mac: %s, host_mac: %s\n", get<0>(row).c_str(), get<1>(row).c_str(), get<2>(row).c_str());
+    }
+    return found_neighbor;
 }

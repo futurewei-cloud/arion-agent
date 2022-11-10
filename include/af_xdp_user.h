@@ -9,6 +9,7 @@
 #include <bpf.h>
 #include <xsk.h>
 #include <errno.h>
+#include <string>
 #ifdef __cplusplus
 extern "C"
 {
@@ -24,7 +25,7 @@ public:
     af_xdp_user() {
         printf("%s", "Start of af_xdp userspace program.");
     }
-    void run_af_xdp(int argc, char *argv[]);
+    void run_af_xdp(std::string table_name_neighbor_ebpf_map);
 private:
 
 };

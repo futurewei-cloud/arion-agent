@@ -162,8 +162,9 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                             &ep.hmac[3], &ep.hmac[4], &ep.hmac[5]);
 
                                 //disabling the element udpate, so that all packets will be sent to user space program.
-                                int ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
 
+                                int ebpf_rc = 0;//bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
+                                printf("Inserted this neighbor into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni);
                                 // step #3 - async call to write/update to local db table 1
                                 local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
                                     get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };

@@ -11,6 +11,8 @@
 //#include <linux/if_arp.h>
 #include <assert.h>
 #include <poll.h>
+//#include <db_client.h>
+//#include <grpc_client.h>
 #include "af_xdp_user.h"
 #include <sys/resource.h>
 #include <signal.h>
@@ -23,6 +25,8 @@
 #include <cstring>
 #include <string>
 #include <bpf_endian.h>
+#include "xdp/trn_datamodel.h"
+//#include "xdp/trn_kern.h"
 
 #define NUM_FRAMES         4096
 #define FRAME_SIZE         XSK_UMEM__DEFAULT_FRAME_SIZE
@@ -30,24 +34,13 @@
 #define INVALID_UMEM_FRAME UINT64_MAX
 #define MSG_DONTWAIT	= 0x40
 #define VXL_DSTPORT 0xb512 // UDP dport 4789(0x12b5) for VxLAN overlay
-
+/* ARP protocol opcodes. */
+#define	ARPOP_REQUEST	1		/* ARP request			*/
+#define	ARPOP_REPLY	2		/* ARP reply			*/
 #ifndef PATH_MAX
+
 #define PATH_MAX	4096
 #endif
-
-/* VXLAN protocol (RFC 7348) header:
- * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |R|R|R|R|I|R|R|R|               Reserved                        |
- * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |                VXLAN Network Identifier (VNI) |   Reserved    |
- * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *
- * I = VXLAN Network Identifier (VNI) present.
- */
-struct vxlanhdr {
-    __be32 vx_flags;
-    __be32 vx_vni;
-};
 
 struct vxlanhdr_internal {
     /* Big endian! */
@@ -60,28 +53,28 @@ struct vxlanhdr_internal {
 };
 
 
-/*
- *	This structure defines an ethernet arp header.
- */
-
-struct arphdr {
-    __be16		ar_hrd;		/* format of hardware address	*/
-    __be16		ar_pro;		/* format of protocol address	*/
-    unsigned char	ar_hln;		/* length of hardware address	*/
-    unsigned char	ar_pln;		/* length of protocol address	*/
-    __be16		ar_op;		/* ARP opcode (command)		*/
-
-#if 0
-	 /*
-	  *	 Ethernet looks like this : This bit is variable sized however...
-	  */
-	unsigned char		ar_sha[ETH_ALEN];	/* sender hardware address	*/
-	unsigned char		ar_sip[4];		/* sender IP address		*/
-	unsigned char		ar_tha[ETH_ALEN];	/* target hardware address	*/
-	unsigned char		ar_tip[4];		/* target IP address		*/
-#endif
-
-};
+///*
+// *	This structure defines an ethernet arp header.
+// */
+//
+//struct arphdr {
+//    __be16		ar_hrd;		/* format of hardware address	*/
+//    __be16		ar_pro;		/* format of protocol address	*/
+//    unsigned char	ar_hln;		/* length of hardware address	*/
+//    unsigned char	ar_pln;		/* length of protocol address	*/
+//    __be16		ar_op;		/* ARP opcode (command)		*/
+//
+//#if 0
+//	 /*
+//	  *	 Ethernet looks like this : This bit is variable sized however...
+//	  */
+//	unsigned char		ar_sha[ETH_ALEN];	/* sender hardware address	*/
+//	unsigned char		ar_sip[4];		/* sender IP address		*/
+//	unsigned char		ar_tha[ETH_ALEN];	/* target hardware address	*/
+//	unsigned char		ar_tip[4];		/* target IP address		*/
+//#endif
+//
+//};
 
 struct arp_message {
     uint16_t hrd;
@@ -160,16 +153,32 @@ static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
     xsk_cfg.libbpf_flags = 0;
     xsk_cfg.xdp_flags = cfg->xdp_flags;
     xsk_cfg.bind_flags = cfg->xsk_bind_flags;
+    if (!umem->umem) {
+        printf("%s\n", "umem is empty!");
+    }
+    if (!(&xsk_info->xsk)) {
+        printf("%s\n", "xsk_ptr is empty!");
+    }
+    if (!(&xsk_info->tx)) {
+        printf("%s\n", "tx is empty!");
+    }
+    if (!(&xsk_info->rx)) {
+        printf("%s\n", "rx is empty!");
+    }
     ret = xsk_socket__create(&xsk_info->xsk, cfg->ifname,
                              cfg->xsk_if_queue, umem->umem, &xsk_info->rx,
                              &xsk_info->tx, &xsk_cfg);
 
-    if (ret)
+    if (ret) {
+        printf("xsk_socket__create failed with ret: [%ld]\n", ret);
         goto error_exit;
+    }
 
     ret = bpf_get_link_xdp_id(cfg->ifindex, &prog_id, cfg->xdp_flags);
-    if (ret)
+    if (ret) {
+        printf("bpf_get_link_xdp_id failed\n");
         goto error_exit;
+    }
 
     /* Initialize umem frame allocation */
 
@@ -183,8 +192,10 @@ static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
                                  XSK_RING_PROD__DEFAULT_NUM_DESCS,
                                  &idx);
 
-    if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
+    if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
+        printf("xsk_ring_prod__reserve failed\n");
         goto error_exit;
+    }
 
     for (i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i ++)
         *xsk_ring_prod__fill_addr(&xsk_info->umem->fq, idx++) =
@@ -307,25 +318,119 @@ static inline void csum_replace2(__sum16 *sum, __be16 old, __be16 present)
     *sum = ~csum16_add(csum16_sub(~(*sum), old), present);
 }
 
+static inline void trn_set_mac(void *dst, unsigned char *mac)
+{
+    unsigned short *d = static_cast<unsigned short *>(dst);
+    unsigned short *s = (unsigned short *)mac;
+
+    d[0] = s[0];
+    d[1] = s[1];
+    d[2] = s[2];
+}
+
+static inline void trn_set_dst_mac(void *data, unsigned char *dst_mac)
+{
+    trn_set_mac(data, dst_mac);
+}
+
+static inline void trn_set_src_mac(void *data, unsigned char *src_mac)
+{
+    uint8_t *tmp = static_cast<uint8_t *>(data);
+    trn_set_mac((void*)(tmp + 6), src_mac);
+}
+
 static __be32 trn_get_vni(const __u8 *vni)
 {
     /* Big endian! */
     return (vni[0] << 16) | (vni[1] << 8) | vni[2];
 }
 
-static bool process_packet(struct xsk_socket_info *xsk,
-                           uint64_t addr, uint32_t len)
+static inline void trn_set_src_ip(void *data, void *data_end, __u32 saddr)
 {
+    int off = offsetof(struct iphdr, saddr);
+    uint8_t *tmp = static_cast<uint8_t *>(data);
+
+    __u32 *addr = (__u32*)(tmp + off);
+    if ((void *)addr > data_end)
+        return;
+
+    *addr = saddr;
+}
+
+static inline void trn_set_dst_ip(void *data, void *data_end, __u32 daddr)
+{
+    int off = offsetof(struct iphdr, daddr);
+    uint8_t *tmp = static_cast<uint8_t *>(data);
+
+    __u32 *addr = (__u32 *)(tmp + off);
+    if ((void *)addr > data_end)
+        return;
+
+    *addr = daddr;
+}
+
+static inline __u16 trn_csum_fold_helper(__u64 csum)
+{
+    int i;
+#pragma unroll
+    for (i = 0; i < 4; i++) {
+        if (csum >> 16)
+            csum = (csum & 0xffff) + (csum >> 16);
+    }
+    return ~csum;
+}
+
+static inline void trn_ipv4_csum_inline(void *iph, __u64 *csum)
+{
+    __u16 *next_iph_u16 = (__u16 *)iph;
+#pragma clang loop unroll(full)
+    for (int i = 0; i<sizeof(struct iphdr)>> 1; i++) {
+        *csum += *next_iph_u16++;
+    }
+    *csum = trn_csum_fold_helper(*csum);
+}
+
+static inline void trn_set_src_dst_ip_csum(struct iphdr *ip,
+                                           __u32 saddr, __u32 daddr, void *data_end)
+{
+    /* Since the packet destination is being rewritten we also
+	decrement the TTL */
+    ip->ttl--;
+
+    __u64 csum = 0;
+    trn_set_src_ip(ip, data_end, saddr);
+    trn_set_dst_ip(ip, data_end, daddr);
+    csum = 0;
+    ip->check = 0;
+    trn_ipv4_csum_inline(ip, &csum);
+    ip->check = csum;
+
+    printf("Modified IP Address, src: 0x%x, dst: 0x%x, csum: 0x%x\n",
+              ip->saddr, ip->daddr, ip->check);
+}
+
+static inline void trn_swap_src_dst_mac(void *data)
+{
+    unsigned short *p = static_cast<unsigned short *>(data);
+    unsigned short tmp[3];
+
+    tmp[0] = p[0];
+    tmp[1] = p[1];
+    tmp[2] = p[2];
+    p[0] = p[3];
+    p[1] = p[4];
+    p[2] = p[5];
+    p[3] = tmp[0];
+    p[4] = tmp[1];
+    p[5] = tmp[2];
+}
+
+static bool process_packet(struct xsk_socket_info *xsk,
+                           uint64_t addr, uint32_t len, int* fd)
+{
+    printf(">>>>>>>>>>  Begin processing packet  >>>>>>>>>>\n");
     uint8_t *pkt = static_cast<uint8_t *>(xsk_umem__get_data(xsk->umem->buffer, addr));
 
-    /* Lesson#3: Write an IPv6 ICMP ECHO parser to send responses
-	 *
-	 * Some assumptions to make it easier:
-	 * - No VLAN handling
-	 * - Only if nexthdr is ICMP
-	 * - Just return all data with MAC/IP swapped, and type set to
-	 *   ICMPV6_ECHO_REPLY
-	 * - Recalculate the icmp checksum */
 
     if (true) {
         /*
@@ -335,123 +440,201 @@ static bool process_packet(struct xsk_socket_info *xsk,
         int ret;
         uint32_t tx_idx = 0;
         uint8_t tmp_mac[ETH_ALEN];
-        struct in6_addr tmp_ip;
+        // parse outer eth header
         struct ethhdr *eth = (struct ethhdr *) pkt;
 
-
-        struct ipv6hdr *ipv6 = (struct ipv6hdr *) (eth + 1);
-        struct icmp6hdr *icmp = (struct icmp6hdr *) (ipv6 + 1);
-
-        if (ntohs(eth->h_proto) != ETH_P_IP
-//            ||
-//            len < (sizeof(*eth) + sizeof(*ipv6) + sizeof(*icmp)) ||
-//            ipv6->nexthdr != IPPROTO_ICMPV6 ||
-//            icmp->icmp6_type != ICMPV6_ECHO_REQUEST
-            ) {
+        if (ntohs(eth->h_proto) != ETH_P_IP) {
             printf("%s\n", "returning false for this packet as it is NOT IP");
             return false;
-        }else {
-            printf("Packet length: %ld\n", len);
-            printf("Outter eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n"
+        }
+        printf("Packet length: %ld\n", len);
+        printf("Outer eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n"
+               "eth size: %d\n",
+               eth->h_source[0],eth->h_source[1],eth->h_source[2],eth->h_source[3],eth->h_source[4],eth->h_source[5],
+               eth->h_dest[0],eth->h_dest[1],eth->h_dest[2],eth->h_dest[3],eth->h_dest[4],eth->h_dest[5],
+               bpf_ntohs(eth->h_proto),
+               sizeof(*eth));
+
+        // parse outer IP header
+        struct iphdr *ip = (struct iphdr *) (eth + 1/*sizeof(*eth)*/);
+        struct in_addr outer_ip_src;
+        outer_ip_src.s_addr = ip->saddr;
+        struct in_addr outer_ip_dest;
+        outer_ip_dest.s_addr = ip->daddr;
+        printf("Outer ip src: %s, ip dest: %s\n"
+               "Outer ip ihl: %d, version: %d\n",
+                inet_ntoa(outer_ip_src),inet_ntoa(outer_ip_dest),
+                ip->ihl, ip->version);
+
+        // parse UDP header
+        struct udphdr *udp = (struct udphdr *) (ip + 1/*sizeof(*ip)*/);
+        printf("UDP dest: %d, UDP src: %d, == VXL_DSTPORT? %s\n",
+               udp->dest, udp->source, (udp->dest==VXL_DSTPORT? "true" : "false"));
+
+        // parse VXLAN header
+        struct vxlanhdr_internal* vxlan = (struct vxlanhdr_internal *)(udp + 1/*sizeof(*udp)*/);
+        printf("VNI: %ld, \n",trn_get_vni(vxlan->vni));
+
+        // parse inner eth header
+        struct ethhdr *inner_eth = (struct ethhdr *)(vxlan + 1/*sizeof(*vxlan)*/);
+        printf("inner eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n",
+               inner_eth->h_source[0],inner_eth->h_source[1],inner_eth->h_source[2],inner_eth->h_source[3],inner_eth->h_source[4],inner_eth->h_source[5],
+               inner_eth->h_dest[0],inner_eth->h_dest[1],inner_eth->h_dest[2],inner_eth->h_dest[3],inner_eth->h_dest[4],inner_eth->h_dest[5],
+               inner_eth->h_proto);
+
+        // TODO: Add inner IP support, refer to trn_process_inner_ip
+        // parse inner IP header
+//        struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
+//        struct in_addr inner_ip_src, inner_ip_dest;
+//        inner_ip_src.s_addr = inner_ip->saddr;
+//        inner_ip_dest.s_addr = inner_ip->daddr;
+
+        // parse inner arp header
+        arp_message *arp_msg = (struct arp_message *)(inner_eth + 1);
+        struct in_addr arp_src_ip;
+        arp_src_ip.s_addr = arp_msg->spa;
+        struct in_addr arp_dest_ip;
+        arp_dest_ip.s_addr = arp_msg->tpa;
+        printf("arp op: %d\n",
+               bpf_htons(arp_msg->op));
+        printf("arp source ip: %s, \n",
+               inet_ntoa(arp_src_ip/*inner_arp_dest_ip*/)
+        );
+        printf("arp dest ip: %s, \n",
+               inet_ntoa(arp_dest_ip/*inner_arp_dest_ip*/)
+        );
+        endpoint_key_t epkey;
+        endpoint_t ep_value;
+//        ep_value = GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(arp_src_ip));
+        if (ep_value.hip > 0) {
+            epkey.vni = trn_get_vni(vxlan->vni);
+            struct sockaddr_in ep_ip;
+            inet_pton(AF_INET, inet_ntoa(arp_src_ip/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
+            epkey.ip = ep_ip.sin_addr.s_addr;
+            // we now have key and value, can modify the packet and update the map now.
+            int ebpf_rc = bpf_map_update_elem((*fd), &epkey, &ep_value, BPF_ANY);
+            printf("Inserted this neighbor into map: vip: %s, vni: %d, ebpf_rc: %d\n",
+                   inet_ntoa(arp_src_ip), trn_get_vni(vxlan->vni), ebpf_rc);
+//            // TODO: step #3 - async call to write/update to local db table 1
+//            local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
+//                get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
+//                local_db.execute(add_or_update_neighbor_db_stmt);
+//            });
+
+            /* Modify pkt for inner ARP response */
+            arp_msg->op = bpf_htons(ARPOP_REPLY);
+            trn_set_mac(arp_msg->tha, arp_msg->sha);
+            trn_set_mac(arp_msg->sha, ep_value.mac);
+
+            __u32 tmp_ip = arp_msg->spa;//*sip;
+            arp_msg->spa = arp_msg->tpa;//*tip;
+            arp_msg->tpa = tmp_ip;
+
+            /* Modify inner EitherHdr, pretend it's from target */
+            trn_set_dst_mac(inner_eth, inner_eth->h_source);
+            trn_set_src_mac(inner_eth, ep_value.mac);
+
+            /* Keep overlay header, swap outer IP header */
+            trn_set_src_dst_ip_csum(ip, ip->daddr, ip->saddr, (eth + len));
+            trn_swap_src_dst_mac(pkt);
+
+            /*
+             * Packet modification finished, read packet content again, in order to verify the mod
+             * */
+
+            struct ethhdr *eth = (struct ethhdr *) pkt;
+
+            if (ntohs(eth->h_proto) != ETH_P_IP) {
+                printf("%s\n", "AFTER MOD: returning false for this packet as it is NOT IP");
+                return false;
+            }
+            printf("AFTER MOD: Packet length: %ld\n", len);
+            printf("AFTER MOD: Outer eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n"
                    "eth size: %d\n",
                    eth->h_source[0],eth->h_source[1],eth->h_source[2],eth->h_source[3],eth->h_source[4],eth->h_source[5],
                    eth->h_dest[0],eth->h_dest[1],eth->h_dest[2],eth->h_dest[3],eth->h_dest[4],eth->h_dest[5],
                    bpf_ntohs(eth->h_proto),
                    sizeof(*eth));
+
+            // parse outer IP header
             struct iphdr *ip = (struct iphdr *) (eth + 1/*sizeof(*eth)*/);
-            struct in_addr outter_ip_src;
-            outter_ip_src.s_addr = ip->saddr;
-            struct in_addr outter_ip_dest;
-            outter_ip_dest.s_addr = ip->daddr;
-            printf("Outter ip src: %s, ip dest: %s\n"
-                   "Outter ip ihl: %d, version: %d\n",
-                    inet_ntoa(outter_ip_src),inet_ntoa(outter_ip_dest),
-                    ip->ihl, ip->version);
+            struct in_addr outer_ip_src;
+            outer_ip_src.s_addr = ip->saddr;
+            struct in_addr outer_ip_dest;
+            outer_ip_dest.s_addr = ip->daddr;
+            printf("AFTER MOD: Outer ip src: %s, ip dest: %s\n"
+                   "AFTER MOD: Outer ip ihl: %d, version: %d\n",
+                   inet_ntoa(outer_ip_src),inet_ntoa(outer_ip_dest),
+                   ip->ihl, ip->version);
+
+            // parse UDP header
             struct udphdr *udp = (struct udphdr *) (ip + 1/*sizeof(*ip)*/);
-            printf("UDP dest: %d, UDP src: %d, == VXL_DSTPORT? %s\n",
+            printf("AFTER MOD: UDP dest: %d, UDP src: %d, == VXL_DSTPORT? %s\n",
                    udp->dest, udp->source, (udp->dest==VXL_DSTPORT? "true" : "false"));
-            // TODO: find a way to get vxlan header
+
+            // parse VXLAN header
             struct vxlanhdr_internal* vxlan = (struct vxlanhdr_internal *)(udp + 1/*sizeof(*udp)*/);
-            printf("VNI: %ld, \n",trn_get_vni(vxlan->vni));
+            printf("AFTER MOD: VNI: %ld, \n",trn_get_vni(vxlan->vni));
+
+            // parse inner eth header
             struct ethhdr *inner_eth = (struct ethhdr *)(vxlan + 1/*sizeof(*vxlan)*/);
-            printf("inner eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n",
+            printf("AFTER MOD: inner eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n",
                    inner_eth->h_source[0],inner_eth->h_source[1],inner_eth->h_source[2],inner_eth->h_source[3],inner_eth->h_source[4],inner_eth->h_source[5],
                    inner_eth->h_dest[0],inner_eth->h_dest[1],inner_eth->h_dest[2],inner_eth->h_dest[3],inner_eth->h_dest[4],inner_eth->h_dest[5],
                    inner_eth->h_proto);
-            struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
-            struct in_addr inner_ip_src, inner_ip_dest;
-            inner_ip_src.s_addr = inner_ip->saddr;
-            inner_ip_dest.s_addr = inner_ip->daddr;
-//            printf("Inner src IP: %d, dest IP: %d\n",
-//                   inet_ntoa(inner_ip_src), inet_ntoa(inner_ip_dest));
-            struct arphdr *inner_arp = (struct arphdr *)(inner_eth + 1/*sizeof(*inner_eth)*/);
-                        unsigned char *sha;
-                        unsigned char *tha = NULL;
-                        __u32 *sip, *tip;
-                        sha = (unsigned char*)(inner_arp + 1);
-                        sip = (__u32 *)(sha + ETH_ALEN);
-                        tha = (unsigned char *)sip + sizeof(__u32);
-                        tip = (__u32 *)(tha + ETH_ALEN);
-                        struct in_addr inner_arp_src_ip, inner_arp_dest_ip;
-                        inner_arp_src_ip.s_addr = (__be32)*sip;
-//                        inner_arp_dest_ip.s_addr = (__be32)*tip;
 
+            // TODO: Add inner IP support, refer to trn_process_inner_ip
+            // parse inner IP header
+            //        struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
+            //        struct in_addr inner_ip_src, inner_ip_dest;
+            //        inner_ip_src.s_addr = inner_ip->saddr;
+            //        inner_ip_dest.s_addr = inner_ip->daddr;
+
+            // parse inner arp header
             arp_message *arp_msg = (struct arp_message *)(inner_eth + 1);
             struct in_addr arp_src_ip;
             arp_src_ip.s_addr = arp_msg->spa;
             struct in_addr arp_dest_ip;
             arp_dest_ip.s_addr = arp_msg->tpa;
-            printf("arp op: %d\n",
-                   bpf_htons(inner_arp->ar_op));
-            printf("arp source ip: %s, \n",
+            printf("AFTER MOD: arp op: %d\n",
+                   bpf_htons(arp_msg->op));
+            printf("AFTER MOD: arp source ip: %s, \n",
                    inet_ntoa(arp_src_ip/*inner_arp_dest_ip*/)
             );
-            printf("arp dest ip: %s, \n",
+            printf("AFTER MOD: arp dest ip: %s, \n",
                    inet_ntoa(arp_dest_ip/*inner_arp_dest_ip*/)
             );
-
-            return false;
-        }
-
-        memcpy(tmp_mac, eth->h_dest, ETH_ALEN);
-        memcpy(eth->h_dest, eth->h_source, ETH_ALEN);
-        memcpy(eth->h_source, tmp_mac, ETH_ALEN);
-
-        memcpy(&tmp_ip, &ipv6->saddr, sizeof(tmp_ip));
-        memcpy(&ipv6->saddr, &ipv6->daddr, sizeof(tmp_ip));
-        memcpy(&ipv6->daddr, &tmp_ip, sizeof(tmp_ip));
-
-        icmp->icmp6_type = ICMPV6_ECHO_REPLY;
-
-        csum_replace2(&icmp->icmp6_cksum,
-                      htons(ICMPV6_ECHO_REQUEST << 8),
-                      htons(ICMPV6_ECHO_REPLY << 8));
-
-        /* Here we sent the packet out of the receive port. Note that
+            /* Here we sent the packet out of the receive port. Note that
 		 * we allocate one entry and schedule it. Your design would be
 		 * faster if you do batch processing/transmission */
 
-        ret = xsk_ring_prod__reserve(&xsk->tx, 1, &tx_idx);
-        if (ret != 1) {
-            /* No more transmit slots, drop the packet */
-            return false;
+            ret = xsk_ring_prod__reserve(&xsk->tx, 1, &tx_idx);
+            if (ret != 1) {
+                /* No more transmit slots, drop the packet */
+                return false;
+            }
+
+            xsk_ring_prod__tx_desc(&xsk->tx, tx_idx)->addr = addr;
+            xsk_ring_prod__tx_desc(&xsk->tx, tx_idx)->len = len;
+            xsk_ring_prod__submit(&xsk->tx, 1);
+            xsk->outstanding_tx++;
+
+            xsk->stats.tx_bytes += len;
+            xsk->stats.tx_packets++;
+            printf("Packet sent via tx queue\n");
+            printf("<<<<<<<<<<  Finished processing packet  <<<<<<<<<<\n");
+
+            return true;
         }
-
-        xsk_ring_prod__tx_desc(&xsk->tx, tx_idx)->addr = addr;
-        xsk_ring_prod__tx_desc(&xsk->tx, tx_idx)->len = len;
-        xsk_ring_prod__submit(&xsk->tx, 1);
-        xsk->outstanding_tx++;
-
-        xsk->stats.tx_bytes += len;
-        xsk->stats.tx_packets++;
-        return true;
+        printf("Endpoing hip == 0, returning false.\n");
+        return false;
     }
 
     return false;
 }
 
 
-static void handle_receive_packets(struct xsk_socket_info *xsk)
+static void handle_receive_packets(struct xsk_socket_info *xsk, int* fd)
 {
     unsigned int rcvd, stock_frames, i;
     uint32_t idx_rx = 0, idx_fq = 0;
@@ -488,7 +671,7 @@ static void handle_receive_packets(struct xsk_socket_info *xsk)
         uint64_t addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
         uint32_t len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
 
-        if (!process_packet(xsk, addr, len))
+        if (!process_packet(xsk, addr, len, fd))
             xsk_free_umem_frame(xsk, addr);
 
         xsk->stats.rx_bytes += len;
@@ -499,10 +682,11 @@ static void handle_receive_packets(struct xsk_socket_info *xsk)
 
     /* Do we need to wake up the kernel for transmission */
     complete_tx(xsk);
+    printf("tx completed\n");
 }
 
 static void rx_and_process(struct config *cfg,
-                           struct xsk_socket_info *xsk_socket)
+                           struct xsk_socket_info *xsk_socket, int* fd)
 {
     struct pollfd fds[2];
     int ret, nfds = 1;
@@ -510,14 +694,14 @@ static void rx_and_process(struct config *cfg,
     memset(fds, 0, sizeof(fds));
     fds[0].fd = xsk_socket__fd(xsk_socket->xsk);
     fds[0].events = POLLIN;
-
+    printf("%s\n", "Entering while loop to process packets.");
     while(!global_exit) {
         if (cfg->xsk_poll_mode) {
             ret = poll(fds, nfds, -1);
             if (ret <= 0 || ret > 1)
                 continue;
         }
-        handle_receive_packets(xsk_socket);
+        handle_receive_packets(xsk_socket, fd);
     }
 }
 
@@ -788,10 +972,17 @@ struct bpf_object *load_bpf_and_xdp_attach(struct config *cfg)
     return bpf_obj;
 }
 
-void af_xdp_user::run_af_xdp(int argc, char *argv[])
+void af_xdp_user::run_af_xdp(std::string table_name_neighbor_ebpf_map)
 {
+    printf("%s", "af_xdp started\n");
+    int fd_neighbor_ebpf_map = bpf_obj_get(table_name_neighbor_ebpf_map.c_str());
+    if (fd_neighbor_ebpf_map < 0) {
+        printf("Failed to get xdp neighbor endpoint map fd, exiting\n");
+        return;
+    } else {
+        printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
+    }
 
-    printf("%s", "af_xdp started");
     int ret;
     int xsks_map_fd;
     void *packet_buffer;
@@ -911,7 +1102,7 @@ void af_xdp_user::run_af_xdp(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     /* Receive and count packets than drop them */
-    rx_and_process(&cfg, xsk_socket);
+    rx_and_process(&cfg, xsk_socket, &fd_neighbor_ebpf_map);
 
     /* Cleanup */
     xsk_socket__delete(xsk_socket->xsk);
