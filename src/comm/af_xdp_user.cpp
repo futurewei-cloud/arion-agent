@@ -505,11 +505,12 @@ static bool process_packet(struct xsk_socket_info *xsk,
         );
         endpoint_key_t epkey;
         endpoint_t ep_value;
-        ep_value = db_client::get_instance().GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(arp_src_ip));
+        ep_value.hip = 0;
+        ep_value = db_client::get_instance().GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(arp_dest_ip));
         if (ep_value.hip > 0) {
             epkey.vni = trn_get_vni(vxlan->vni);
             struct sockaddr_in ep_ip;
-            inet_pton(AF_INET, inet_ntoa(arp_src_ip/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
+            inet_pton(AF_INET, inet_ntoa(arp_dest_ip/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
             epkey.ip = ep_ip.sin_addr.s_addr;
             // we now have key and value, can modify the packet and update the map now.
             int ebpf_rc = bpf_map_update_elem((*fd), &epkey, &ep_value, BPF_ANY);

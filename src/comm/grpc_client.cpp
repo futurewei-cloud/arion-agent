@@ -173,20 +173,20 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
                                 //disabling the element udpate, so that all packets will be sent to user space program.
 
                                 int ebpf_rc = 0;//bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
-                                printf("GPPC: Inserted this neighbor into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni);
+                                printf("GPPC: Inserted this neighbor into map: vip: %s, vni: %d\n", vpc_ip.c_str(), vni);
                                 // step #3 - async call to write/update to local db table 1
-//                                db_client::get_instance().local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
-//                                    get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
-//                                    db_client::get_instance().local_db.execute(add_or_update_neighbor_db_stmt);
-//                                });
+                                db_client::get_instance().local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
+                                    get<0>(add_or_update_neighbor_db_stmt) = { vni, vpc_ip, host_ip, vpc_mac, host_mac, ver };
+                                    db_client::get_instance().local_db.execute(add_or_update_neighbor_db_stmt);
+                                });
                                 printf("Dispatched local db neighbor insert\n");
                                 // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
-//                                if (0 == ebpf_rc) {
-//                                    db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
-//                                        get<0>(add_programmed_version_db_stmt) = { ver };
-//                                        db_client::get_instance().local_db.execute(add_programmed_version_db_stmt);
-//                                    });
-//                                }
+                                if (0 == ebpf_rc) {
+                                    db_client::get_instance().local_db_writer_queue.dispatch([ver, &add_programmed_version_db_stmt] {
+                                        get<0>(add_programmed_version_db_stmt) = { ver };
+                                        db_client::get_instance().local_db.execute(add_programmed_version_db_stmt);
+                                    });
+                                }
                                 printf("Dispatched local db journal insert\n");
                             } else {
                                 printf("ebpf_ignored = true\n");
