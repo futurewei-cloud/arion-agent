@@ -199,6 +199,7 @@ public:
 
     endpoint_t GetNeighbor(int vni, std::string vpc_ip) {
         endpoint_t found_neighbor;
+        found_neighbor.hip = 0;
         printf("GetNeighbor with VNI: [%d], vpc_ip: [%s]\n", vni, vpc_ip.c_str());
         get<0>(query_neighbor_statement) = vni;
         get<1>(query_neighbor_statement) = vpc_ip.c_str();
