@@ -15,8 +15,10 @@
 #include <memory>
 #include <mutex>
 #include <sqlite_orm.h>
+#include <concurrency/ConcurrentHashMap.h>
 #include "dispatch_queue.h"
 #include "xdp/trn_datamodel.h"
+#include "util.h"
 
 using namespace sqlite_orm;
 
@@ -34,97 +36,21 @@ struct ProgrammingState {
     int version;
 }; // local db table 2 - neighbor ebpf programmed version
 
+// copied from arp_hash in ACA
+struct EndpointHash {
+    size_t operator()(const endpoint_key_t &e) const{
+        return std::hash<__u32>()(e.vni) ^ (std::hash<__u32>()(e.ip) << 1);
+    }
+};
+
+struct EndpointEqual {
+    bool operator() (const endpoint_key_t &e, const endpoint_key_t &f) const {
+        return (e.vni == f.vni) && (e.ip == f.ip);
+    }
+};
+
 static std::string g_local_db_path = "/var/local/arion/arion_wing.db";
 
-// Schema definition (create DB if not exists) or retrieved handle (get DB if exists already) of local db
-//static auto local_db = make_storage(g_local_db_path,
-//                             make_table("neighbor",
-//                                        make_column("vni", &Neighbor::vni),
-//                                        make_column("vpc_ip", &Neighbor::vpc_ip),
-//                                        make_column("host_ip", &Neighbor::host_ip),
-//                                        make_column("vpc_mac", &Neighbor::vpc_mac),
-//                                        make_column("host_mac", &Neighbor::host_mac),
-//                                        make_column("version", &Neighbor::version),
-//                                        primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
-//                             ),
-//                             make_table("journal",
-//                                        make_column("version", &ProgrammingState::version),
-//                                        primary_key(&ProgrammingState::version)
-//                             )
-//);
-
-// Create local db writer single thread execution queue
-//static dispatch_queue local_db_writer_queue("Local db background write queue", 1);
-//
-//static int FindLKGVersion() {
-//    int lkg_ver = 0;
-//
-//    /* original sql is
-//        SELECT  MIN(mo.version) + 1
-//        FROM    journal AS mo
-//        WHERE   NOT EXISTS
-//                (
-//                SELECT  0 - mi.version
-//                FROM    journal AS mi
-//                WHERE   mo.version + 1 = mi.version
-//                );
-//    */
-//
-//    using als_mo = alias_a<ProgrammingState>;
-//    using als_mi = alias_b<ProgrammingState>;
-//    auto ver_gaps = local_db.select(alias_column<als_mo>(&ProgrammingState::version),
-//                                    from<als_mo>(),
-//                                    where(not exists(
-//                                          select(0 - c(alias_column<als_mi>(&ProgrammingState::version)),
-//                                                 from<als_mi>(),
-//                                                 where(is_equal(c(alias_column<als_mo>(&ProgrammingState::version)) + 1, alias_column<als_mi>(&ProgrammingState::version)))
-//                                          ))));
-//
-//    // lkg version:
-//    //   case 1 - if no ver gap, the query above will return the max version (since this version is already programmed, so return max + 1)
-//    //   case 2 - if there's ver gap, then always locate the min ver gap (as above, return minVerGap + 1)
-//    //   case 3 - if the table is empty like new launched instance, then always sync/watch from server with version 1
-//    //            (since server syncs including the version agent provides, so sync/watch from version 1 means sync everything
-//    if (ver_gaps.size() > 0) {
-//        lkg_ver = *std::min_element(ver_gaps.begin(), ver_gaps.end());
-//    }
-//
-//    return lkg_ver + 1;
-//}
-
-/*  SELECT host_ip, vpc_mac, host_mac
- *  FROM neighbor
- *  WHERE vni=%{vni} AND vpc_ip=%{vpc_ip}
- * */
-//static auto query_neighbor_statement =
-//        local_db.prepare(select(columns(&Neighbor::host_ip, &Neighbor::vpc_mac, &Neighbor::host_mac),
-//                                where(is_equal((&Neighbor::vni), 0) and is_equal((&Neighbor::vpc_ip), "127.0.0.1"))));
-
-//static endpoint_t GetNeighbor(int vni, std::string vpc_ip) {
-//    endpoint_t found_neighbor;
-//    printf("GetNeighbor with VNI: [%d], vpc_ip: [%s]\n", vni, vpc_ip.c_str());
-//    get<0>(query_neighbor_statement) = vni;
-//    get<1>(query_neighbor_statement) = vpc_ip.c_str();
-//    printf("Statement: %s\n", query_neighbor_statement.sql().c_str());
-//    auto rows = local_db.execute(query_neighbor_statement);
-//    printf("Found %ld rows\n", rows.size());
-//    for (auto& row : rows) {
-//        struct sockaddr_in ep_hip;
-//        inet_pton(AF_INET, get<0>(row).c_str(), &(ep_hip.sin_addr));
-//        found_neighbor.hip = ep_hip.sin_addr.s_addr;
-//
-//        std::sscanf(get<1>(row).c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
-//                    &found_neighbor.mac[0], &found_neighbor.mac[1], &found_neighbor.mac[2],
-//                    &found_neighbor.mac[3], &found_neighbor.mac[4], &found_neighbor.mac[5]);
-//
-//        std::sscanf(get<2>(row).c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
-//                    &found_neighbor.hmac[0], &found_neighbor.hmac[1], &found_neighbor.hmac[2],
-//                    &found_neighbor.hmac[3], &found_neighbor.hmac[4], &found_neighbor.hmac[5]);
-//
-//        printf("host_ip: %s, vpc_mac: %s, host_mac: %s\n", get<0>(row).c_str(), get<1>(row).c_str(), get<2>(row).c_str());
-//    }
-//    return found_neighbor;
-//}
 inline auto make_storage_query () {
     return make_storage(g_local_db_path,
                         make_table("neighbor",
@@ -161,6 +87,39 @@ public:
     // Create local db writer single thread execution queue
     dispatch_queue local_db_writer_queue = dispatch_queue("Local db background write queue", 1);
 
+    folly::ConcurrentHashMap<endpoint_key_t, endpoint_t, EndpointHash, EndpointEqual> endpoint_cache;
+
+
+    void FillEndpointCacheFromDB() {
+        // Get all neighbors from SQLite Database
+        auto get_all_neighbors_statement = local_db.prepare(
+                select(
+                        columns(&Neighbor::vni, &Neighbor::vpc_ip, &Neighbor::host_mac, &Neighbor::vpc_mac, &Neighbor::host_ip)
+                        )
+                );
+        auto rows = local_db.execute(get_all_neighbors_statement);
+        printf("Retrieved %ld neighbors from local DB\n", rows.size());
+        for (auto & row : rows) {
+            endpoint_key_t key;
+            key.vni = (get<0>(row));
+            struct sockaddr_in ep_ip;
+            inet_pton(AF_INET, get<1>(row).c_str(), &(ep_ip.sin_addr));
+            key.ip = ep_ip.sin_addr.s_addr;
+            endpoint_t value;
+            std::sscanf(get<3>(row).c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                        &value.mac[0], &value.mac[1], &value.mac[2],
+                        &value.mac[3], &value.mac[4], &value.mac[5]);
+
+            std::sscanf(get<2>(row).c_str(), "%02x:%02x:%02x:%02x:%02x:%02x",
+                        &value.hmac[0], &value.hmac[1], &value.hmac[2],
+                        &value.hmac[3], &value.hmac[4], &value.hmac[5]);
+            struct sockaddr_in ep_hip;
+            inet_pton(AF_INET, get<4>(row).c_str(), &(ep_hip.sin_addr));
+            value.hip = ep_hip.sin_addr.s_addr;
+            endpoint_cache.insert(key, value);
+        }
+        printf("Finished retrieving from local DB, not endpoint cache has %ld endpoints\n", endpoint_cache.size());
+    }
     int FindLKGVersion() {
         int lkg_ver = 0;
 
@@ -200,12 +159,12 @@ public:
     endpoint_t GetNeighbor(int vni, std::string vpc_ip) {
         endpoint_t found_neighbor;
         found_neighbor.hip = 0;
-        printf("GetNeighbor with VNI: [%d], vpc_ip: [%s]\n", vni, vpc_ip.c_str());
+//        printf("GetNeighbor with VNI: [%d], vpc_ip: [%s]\n", vni, vpc_ip.c_str());
         get<0>(query_neighbor_statement) = vni;
         get<1>(query_neighbor_statement) = vpc_ip.c_str();
-        printf("Statement: %s\n", query_neighbor_statement.sql().c_str());
+//        printf("Statement: %s\n", query_neighbor_statement.sql().c_str());
         auto rows = local_db.execute(query_neighbor_statement);
-        printf("Found %ld rows\n", rows.size());
+//        printf("Found %ld rows\n", rows.size());
         for (auto& row : rows) {
             struct sockaddr_in ep_hip;
             inet_pton(AF_INET, get<0>(row).c_str(), &(ep_hip.sin_addr));
@@ -219,8 +178,17 @@ public:
                         &found_neighbor.hmac[0], &found_neighbor.hmac[1], &found_neighbor.hmac[2],
                         &found_neighbor.hmac[3], &found_neighbor.hmac[4], &found_neighbor.hmac[5]);
 
-            printf("host_ip: %s, vpc_mac: %s, host_mac: %s\n", get<0>(row).c_str(), get<1>(row).c_str(), get<2>(row).c_str());
+//            printf("host_ip: %s, vpc_mac: %s, host_mac: %s\n", get<0>(row).c_str(), get<1>(row).c_str(), get<2>(row).c_str());
         }
         return found_neighbor;
+    }
+
+    endpoint_t* GetNeighborInMemory(endpoint_key_t * key) {
+        auto iterator = endpoint_cache.find(*key);
+        if (iterator == endpoint_cache.end()) {
+          return nullptr;
+        }
+        auto endpoint_value = iterator->second;//endpoint_cache[*key];
+        return std::move(&endpoint_value);
     }
 };
