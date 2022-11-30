@@ -380,19 +380,27 @@ static bool process_packet(struct xsk_socket_info *xsk,
             struct sockaddr_in ep_ip;
             inet_pton(AF_INET, inet_ntoa(arp_dest_ip/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
             epkey.ip = ep_ip.sin_addr.s_addr;
-            auto ep_value = db_client::get_instance().GetNeighborInMemory(&epkey);
+            auto ep_value = db_client::get_instance().GetNeighborInMemory(epkey);
 //            endpoint_t ep_value;
 //            ep_value = db_client::get_instance().GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(arp_dest_ip));
-            if (ep_value != nullptr) {
+            if (ep_value.hip != 0) {
                 // we now have key and value, can modify the packet and update the map now.
 //                int ebpf_rc = bpf_map_update_elem((*fd), &epkey, &ep_value, BPF_ANY);
 //                printf("AF_XDP: Inserted this neighbor into map: vip: %s, vni: %d, ebpf_rc: %d\n",
 //                       inet_ntoa(arp_src_ip), trn_get_vni(vxlan->vni), 0);
 
                 /* Modify pkt for inner ARP response */
+//                struct in_addr ep_ip_addr, ep_host_ip_addr;
+//                ep_ip_addr.s_addr = epkey.ip;
+//                ep_host_ip_addr.s_addr = ep_value.hip;
+//                printf("Retrived this endpoint: HIP: %s, IP: %s, host_mac: %x:%x:%x:%x:%x:%x, mac: %x:%x:%x:%x:%x:%x\n",
+//                       inet_ntoa(ep_host_ip_addr), inet_ntoa(ep_ip_addr),
+//                       ep_value.hmac[0],ep_value.hmac[1],ep_value.hmac[2],ep_value.hmac[3],ep_value.hmac[4],ep_value.hmac[5],
+//                       ep_value.mac[0],ep_value.mac[1],ep_value.mac[2],ep_value.mac[3],ep_value.mac[4],ep_value.mac[5]
+//                );
                 arp_msg->op = bpf_htons(ARPOP_REPLY);
                 trn_set_mac(arp_msg->tha, arp_msg->sha);
-                trn_set_mac(arp_msg->sha, ep_value->mac);
+                trn_set_mac(arp_msg->sha, ep_value.mac);
 
                 __u32 tmp_ip = arp_msg->spa;//*sip;
                 arp_msg->spa = arp_msg->tpa;//*tip;
@@ -400,7 +408,7 @@ static bool process_packet(struct xsk_socket_info *xsk,
 
                 /* Modify inner EitherHdr, pretend it's from target */
                 trn_set_dst_mac(inner_eth, inner_eth->h_source);
-                trn_set_src_mac(inner_eth, ep_value->mac);
+                trn_set_src_mac(inner_eth, ep_value.mac);
 
                 /* Keep overlay header, swap outer IP header */
                 trn_set_src_dst_ip_csum(ip, ip->daddr, ip->saddr, (eth + len));
@@ -410,12 +418,12 @@ static bool process_packet(struct xsk_socket_info *xsk,
              * Packet modification finished, read packet content again, in order to verify the mod
              * */
 
-                struct ethhdr *eth = (struct ethhdr *) pkt;
-
-                if (ntohs(eth->h_proto) != ETH_P_IP) {
-//                    printf("%s\n", "AFTER MOD: returning false for this packet as it is NOT IP");
-                    return false;
-                }
+//                struct ethhdr *eth = (struct ethhdr *) pkt;
+//
+//                if (ntohs(eth->h_proto) != ETH_P_IP) {
+////                    printf("%s\n", "AFTER MOD: returning false for this packet as it is NOT IP");
+//                    return false;
+//                }
 //                printf("AFTER MOD: Packet length: %ld\n", len);
 //                printf("AFTER MOD: Outer eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n"
 //                       "eth size: %d\n",
@@ -504,10 +512,11 @@ static bool process_packet(struct xsk_socket_info *xsk,
             struct sockaddr_in ep_ip;
             inet_pton(AF_INET, inet_ntoa(inner_ip_dest/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
             epkey.ip = ep_ip.sin_addr.s_addr;
-            auto ep_value = db_client::get_instance().GetNeighborInMemory(&epkey);
+            auto ep_value = db_client::get_instance().GetNeighborInMemory(epkey);
 //            endpoint_t ep_value;
 //            ep_value = db_client::get_instance().GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(inner_ip_dest));
-            if (ep_value != nullptr) {
+
+            if (ep_value.hip != 0) {
 //                epkey.vni = trn_get_vni(vxlan->vni);
 //                struct sockaddr_in ep_ip;
 //                inet_pton(AF_INET, inet_ntoa(inner_ip_dest/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
@@ -518,23 +527,31 @@ static bool process_packet(struct xsk_socket_info *xsk,
 //                       inet_ntoa(inner_ip_dest), trn_get_vni(vxlan->vni), 0);
 
                 /* Modify inner EitherHdr, pretend it's from target */
-                trn_set_dst_mac(inner_eth, ep_value->mac);
+//                struct in_addr ep_ip_addr, ep_host_ip_addr;
+//                ep_ip_addr.s_addr = epkey.ip;
+//                ep_host_ip_addr.s_addr = ep_value.hip;
+//                printf("Retrived this endpoint: HIP: %s, IP: %s, host_mac: %x:%x:%x:%x:%x:%x, mac: %x:%x:%x:%x:%x:%x\n",
+//                       inet_ntoa(ep_host_ip_addr), inet_ntoa(ep_ip_addr),
+//                       ep_value.hmac[0],ep_value.hmac[1],ep_value.hmac[2],ep_value.hmac[3],ep_value.hmac[4],ep_value.hmac[5],
+//                       ep_value.mac[0],ep_value.mac[1],ep_value.mac[2],ep_value.mac[3],ep_value.mac[4],ep_value.mac[5]
+//                );
+                trn_set_dst_mac(inner_eth, ep_value.mac);
 
                 /* Keep overlay header, update outer header destinations */
-                trn_set_src_dst_ip_csum(ip, ip->daddr, ep_value->hip, (eth + len));
+                trn_set_src_dst_ip_csum(ip, ip->daddr, ep_value.hip, (eth + len));
                 trn_set_src_mac(eth, eth->h_dest);
-                trn_set_dst_mac(eth, ep_value->hmac);
+                trn_set_dst_mac(eth, ep_value.hmac);
 
                 /*
              * Packet modification finished, read packet content again, in order to verify the mod
              * */
 
-                struct ethhdr *eth = (struct ethhdr *) pkt;
-
-                if (ntohs(eth->h_proto) != ETH_P_IP) {
-//                    printf("%s\n", "AFTER MOD: returning false for this packet as it is NOT IP");
-                    return false;
-                }
+//                struct ethhdr *eth = (struct ethhdr *) pkt;
+//
+//                if (ntohs(eth->h_proto) != ETH_P_IP) {
+////                    printf("%s\n", "AFTER MOD: returning false for this packet as it is NOT IP");
+//                    return false;
+//                }
 //                printf("AFTER MOD: Packet length: %ld\n", len);
 //                printf("AFTER MOD: Outer eth src: %x:%x:%x:%x:%x:%x, dest: %x:%x:%x:%x:%x:%x; next proto: 0x%x\n"
 //                       "eth size: %d\n",
@@ -612,11 +629,21 @@ static bool process_packet(struct xsk_socket_info *xsk,
 }
 
 
-static void handle_receive_packets(struct xsk_socket_info *xsk, int* fd)
+static void handle_receive_packets(struct xsk_socket_info *xsk, int* fd, atomic<unsigned long long>* processed_packet_count)
 {
     unsigned int rcvd, stock_frames, i;
     uint32_t idx_rx = 0, idx_fq = 0;
     int ret;
+
+//    marl::schedule([&processed_packet_count] {
+//        int ten_seconds = (10 * 1000 * 1000);
+//        while (true){
+//            usleep(ten_seconds);
+//            auto current_count = processed_packet_count.load();
+//            printf("Ten seconds passed, processed packet count: %ld\n",
+//                   current_count);
+//        }
+//    });
 
     rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
     if (!rcvd)
@@ -653,6 +680,7 @@ static void handle_receive_packets(struct xsk_socket_info *xsk, int* fd)
             xsk_free_umem_frame(xsk, addr);
 
         xsk->stats.rx_bytes += len;
+        processed_packet_count->fetch_add(1);
     }
 
     xsk_ring_cons__release(&xsk->rx, rcvd);
@@ -673,13 +701,26 @@ static void rx_and_process(struct config *cfg,
     fds[0].fd = xsk_socket__fd(xsk_socket->xsk);
     fds[0].events = POLLIN;
     printf("%s\n", "Entering while loop to process packets.");
+    atomic<unsigned long long> processed_packet_count(0);
+    std::thread t(
+            [&] {
+                int ten_seconds = (10 * 1000 * 1000);
+                while (true){
+                    usleep(ten_seconds);
+                    auto current_count = processed_packet_count.load();
+                    printf("Ten seconds passed, processed packet count: %ld\n",
+                           current_count);
+                }
+            }
+    );
+    t.detach();
     while(!global_exit) {
         if (cfg->xsk_poll_mode) {
             ret = poll(fds, nfds, -1);
             if (ret <= 0 || ret > 1)
                 continue;
         }
-        handle_receive_packets(xsk_socket, fd);
+        handle_receive_packets(xsk_socket, fd, &processed_packet_count);
     }
 }
 
@@ -987,9 +1028,9 @@ void af_xdp_user::run_af_xdp()
     cfg.ifindex = if_nametoindex(cfg.ifname);
     // skb mode
     cfg.xdp_flags &= ~XDP_FLAGS_MODES;
-    cfg.xdp_flags |= XDP_FLAGS_DRV_MODE;
-    cfg.xsk_bind_flags &= XDP_COPY;//XDP_ZEROCOPY;
-    cfg.xsk_bind_flags |= XDP_ZEROCOPY;//XDP_COPY;
+    cfg.xdp_flags |= XDP_FLAGS_SKB_MODE;//XDP_FLAGS_DRV_MODE;
+    cfg.xsk_bind_flags &= XDP_ZEROCOPY;//XDP_COPY;
+    cfg.xsk_bind_flags |= XDP_COPY;//XDP_ZEROCOPY;
 
     // queue_id, default = 0
     cfg.xsk_if_queue = 0;

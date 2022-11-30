@@ -100,6 +100,9 @@ public:
         auto rows = local_db.execute(get_all_neighbors_statement);
         printf("Retrieved %ld neighbors from local DB\n", rows.size());
         for (auto & row : rows) {
+            printf("Retrieved this endpoint from local DB: VNI: %ld, vpc_ip: %s, host_mac: %s, vpc_mac: %s, host_ip: %s\n",
+                   get<0>(row), get<1>(row).c_str(), get<2>(row).c_str(), get<3>(row).c_str(), get<4>(row).c_str()
+                   );
             endpoint_key_t key;
             key.vni = (get<0>(row));
             struct sockaddr_in ep_ip;
@@ -117,6 +120,12 @@ public:
             inet_pton(AF_INET, get<4>(row).c_str(), &(ep_hip.sin_addr));
             value.hip = ep_hip.sin_addr.s_addr;
             endpoint_cache.insert(key, value);
+            printf("Inserted this endpoint into cache: VNI: %ld, vpc_ip: %s, host_mac: %x:%x:%x:%x:%x:%x, vpc_mac: %x:%x:%x:%x:%x:%x, host_ip: %s\n",
+                   key.vni, inet_ntoa(ep_ip.sin_addr),
+                   value.hmac[0],value.hmac[1],value.hmac[2],value.hmac[3],value.hmac[4],value.hmac[5],
+                   value.mac[0],value.mac[1],value.mac[2],value.mac[3],value.mac[4],value.mac[5],
+                   inet_ntoa(ep_hip.sin_addr)
+            );
         }
         printf("Finished retrieving from local DB, not endpoint cache has %ld endpoints\n", endpoint_cache.size());
     }
@@ -183,12 +192,14 @@ public:
         return found_neighbor;
     }
 
-    endpoint_t* GetNeighborInMemory(endpoint_key_t * key) {
-        auto iterator = endpoint_cache.find(*key);
+    endpoint_t GetNeighborInMemory(endpoint_key_t  key) {
+        auto iterator = endpoint_cache.find(key);
         if (iterator == endpoint_cache.end()) {
-          return nullptr;
+          return {
+                .hip = 0,
+            };
         }
         auto endpoint_value = iterator->second;//endpoint_cache[*key];
-        return std::move(&endpoint_value);
+        return endpoint_value;
     }
 };
