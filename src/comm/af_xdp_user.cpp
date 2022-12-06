@@ -28,8 +28,12 @@
 #include "xdp/trn_datamodel.h"
 #include "util.h"
 //#include "xdp/trn_kern.h"
+#include "marl/defer.h"
+#include "marl/event.h"
+#include "marl/scheduler.h"
+#include "marl/waitgroup.h"
 
-#define NUM_FRAMES         4096
+#define NUM_FRAMES         40960//4096
 #define FRAME_SIZE         XSK_UMEM__DEFAULT_FRAME_SIZE
 #define RX_BATCH_SIZE      64
 #define INVALID_UMEM_FRAME UINT64_MAX
@@ -502,8 +506,9 @@ static bool process_packet(struct xsk_socket_info *xsk,
             // TODO: Add inner IP support, refer to trn_process_inner_ip
             // parse inner IP header
             struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
-            struct in_addr inner_ip_src, inner_ip_dest;
-            inner_ip_src.s_addr = inner_ip->saddr;
+//            struct in_addr inner_ip_src;
+//            inner_ip_src.s_addr = inner_ip->saddr;
+            struct in_addr inner_ip_dest;
             inner_ip_dest.s_addr = inner_ip->daddr;
 //            printf("Inner IP src: %s\n", inet_ntoa(inner_ip_src));
 //            printf("Inner IP dest: %s\n", inet_ntoa(inner_ip_dest));
@@ -526,7 +531,6 @@ static bool process_packet(struct xsk_socket_info *xsk,
 //                printf("AF_XDP: Inserted this neighbor into map: vip: %s, vni: %d, ebpf_rc: %d\n",
 //                       inet_ntoa(inner_ip_dest), trn_get_vni(vxlan->vni), 0);
 
-                /* Modify inner EitherHdr, pretend it's from target */
 //                struct in_addr ep_ip_addr, ep_host_ip_addr;
 //                ep_ip_addr.s_addr = epkey.ip;
 //                ep_host_ip_addr.s_addr = ep_value.hip;
@@ -535,6 +539,8 @@ static bool process_packet(struct xsk_socket_info *xsk,
 //                       ep_value.hmac[0],ep_value.hmac[1],ep_value.hmac[2],ep_value.hmac[3],ep_value.hmac[4],ep_value.hmac[5],
 //                       ep_value.mac[0],ep_value.mac[1],ep_value.mac[2],ep_value.mac[3],ep_value.mac[4],ep_value.mac[5]
 //                );
+
+                /* Modify inner EitherHdr, pretend it's from target */
                 trn_set_dst_mac(inner_eth, ep_value.mac);
 
                 /* Keep overlay header, update outer header destinations */
@@ -635,16 +641,6 @@ static void handle_receive_packets(struct xsk_socket_info *xsk, int* fd, atomic<
     uint32_t idx_rx = 0, idx_fq = 0;
     int ret;
 
-//    marl::schedule([&processed_packet_count] {
-//        int ten_seconds = (10 * 1000 * 1000);
-//        while (true){
-//            usleep(ten_seconds);
-//            auto current_count = processed_packet_count.load();
-//            printf("Ten seconds passed, processed packet count: %ld\n",
-//                   current_count);
-//        }
-//    });
-
     rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
     if (!rcvd)
         return;
@@ -688,7 +684,7 @@ static void handle_receive_packets(struct xsk_socket_info *xsk, int* fd, atomic<
 
     /* Do we need to wake up the kernel for transmission */
     complete_tx(xsk);
-//    printf("tx completed\n");
+    //    printf("tx completed\n");
 }
 
 static void rx_and_process(struct config *cfg,
@@ -710,6 +706,7 @@ static void rx_and_process(struct config *cfg,
                     auto current_count = processed_packet_count.load();
                     printf("Ten seconds passed, processed packet count: %ld\n",
                            current_count);
+
                 }
             }
     );
@@ -1028,14 +1025,14 @@ void af_xdp_user::run_af_xdp()
     cfg.ifindex = if_nametoindex(cfg.ifname);
     // skb mode
     cfg.xdp_flags &= ~XDP_FLAGS_MODES;
-    cfg.xdp_flags |= XDP_FLAGS_SKB_MODE;//XDP_FLAGS_DRV_MODE;
-    cfg.xsk_bind_flags &= XDP_ZEROCOPY;//XDP_COPY;
-    cfg.xsk_bind_flags |= XDP_COPY;//XDP_ZEROCOPY;
+    cfg.xdp_flags |= XDP_FLAGS_DRV_MODE;//XDP_FLAGS_DRV_MODE;
+    cfg.xsk_bind_flags &= XDP_COPY;//XDP_COPY;
+    cfg.xsk_bind_flags |= XDP_ZEROCOPY;//XDP_ZEROCOPY;
 
     // queue_id, default = 0
     cfg.xsk_if_queue = 0;
     // NOT using poll
-    cfg.xsk_poll_mode = true;
+    cfg.xsk_poll_mode = false;
     // not doing unload this time
     cfg.do_unload = false;
     // progsec of the xdp program

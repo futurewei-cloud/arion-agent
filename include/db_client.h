@@ -87,7 +87,7 @@ public:
     // Create local db writer single thread execution queue
     dispatch_queue local_db_writer_queue = dispatch_queue("Local db background write queue", 1);
 
-    folly::ConcurrentHashMap<endpoint_key_t, endpoint_t, EndpointHash, EndpointEqual> endpoint_cache;
+    std::unordered_map<endpoint_key_t, endpoint_t, EndpointHash, EndpointEqual> endpoint_cache;
 
 
     void FillEndpointCacheFromDB() {
@@ -119,7 +119,8 @@ public:
             struct sockaddr_in ep_hip;
             inet_pton(AF_INET, get<4>(row).c_str(), &(ep_hip.sin_addr));
             value.hip = ep_hip.sin_addr.s_addr;
-            endpoint_cache.insert(key, value);
+            endpoint_cache[key] = value;
+//            endpoint_cache.insert(key, value);
             printf("Inserted this endpoint into cache: VNI: %ld, vpc_ip: %s, host_mac: %x:%x:%x:%x:%x:%x, vpc_mac: %x:%x:%x:%x:%x:%x, host_ip: %s\n",
                    key.vni, inet_ntoa(ep_ip.sin_addr),
                    value.hmac[0],value.hmac[1],value.hmac[2],value.hmac[3],value.hmac[4],value.hmac[5],

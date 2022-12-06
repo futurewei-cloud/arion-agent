@@ -74,13 +74,13 @@ static void cleanup() {
         printf("%s", "Unable to delete grpc client pointer since it is null.\n");
     }
 
-//    if (g_grpc_client_thread != NULL) {
-//        delete g_grpc_client_thread;
-//        g_grpc_client_thread = NULL;
-//        printf("%s", "Cleaned up grpc client thread.\n");
-//    } else {
-//        printf("%s", "Unable to call delete grpc client thread pointer since it is null.\n");
-//    }
+    if (g_grpc_client_thread != NULL) {
+        delete g_grpc_client_thread;
+        g_grpc_client_thread = NULL;
+        printf("%s", "Cleaned up grpc client thread.\n");
+    } else {
+        printf("%s", "Unable to call delete grpc client thread pointer since it is null.\n");
+    }
 }
 
 // function to handle ctrl-c and kill process

@@ -174,7 +174,7 @@ void ArionMasterWatcherImpl::RequestNeighborRules(ArionWingRequest *request,
 
                                 int ebpf_rc = 0;//bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
                                 // also put in local in memory cache
-                                db_client::get_instance().endpoint_cache.insert(epkey, ep);
+                                db_client::get_instance().endpoint_cache[epkey] = ep;//.insert(epkey, ep);
                                 printf("GPPC: Inserted this neighbor into map: vip: %s, vni: %d\n", vpc_ip.c_str(), vni);
                                 // step #3 - async call to write/update to local db table 1
                                 db_client::get_instance().local_db_writer_queue.dispatch([vni, vpc_ip, host_ip, vpc_mac, host_mac, ver, &add_or_update_neighbor_db_stmt] {
