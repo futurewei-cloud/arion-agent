@@ -350,8 +350,8 @@ static bool process_packet(struct xsk_socket_info *xsk,
 
         // parse UDP header
         struct udphdr *udp = (struct udphdr *) (ip + 1/*sizeof(*ip)*/);
-//        printf("UDP dest: %d, UDP src: %d, == VXL_DSTPORT? %s\n",
-//               udp->dest, udp->source, (udp->dest==VXL_DSTPORT? "true" : "false"));
+        printf("UDP dest: %d, UDP src: %d, == VXL_DSTPORT? %s\n",
+               udp->dest, udp->source, (udp->dest==VXL_DSTPORT? "true" : "false"));
 
         // parse VXLAN header
         struct vxlanhdr_internal* vxlan = (struct vxlanhdr_internal *)(udp + 1/*sizeof(*udp)*/);

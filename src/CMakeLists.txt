@@ -5,7 +5,7 @@ set(SOURCES
     ./comm/grpc_client.cpp
     comm/af_xdp_user.cpp
 #    db/db_client.cpp
-    )
+        comm/af_xdp_user_multi_thread.cpp )
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -idirafter /usr/src/linux-headers-5.10.4/include/")
 
 #FIND_LIBRARY(LIBUUID_LIBRARIES uuid)

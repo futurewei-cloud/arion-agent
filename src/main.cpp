@@ -26,6 +26,7 @@
 #include "marl/scheduler.h"
 #include "marl/waitgroup.h"
 #include "af_xdp_user.h"
+#include "af_xdp_user_multi_thread.h"
 #include "grpc_client.h"
 
 using namespace std;
@@ -146,10 +147,13 @@ int main(int argc, char *argv[]) {
                                  g_arion_neighbor_table);
     });
 
-    marl::schedule([=] {
-        auto af = af_xdp_user();
-        af.run_af_xdp(/*g_arion_neighbor_table*/);
-    });
+//    marl::schedule([=] {
+//        auto af = af_xdp_user();
+//        af.run_af_xdp(/*g_arion_neighbor_table*/);
+//    });
+    auto afm = af_xdp_user_multi_thread();
+    pthread_t t;
+    pthread_create(&t, NULL, &af_xdp_user_multi_thread::run_af_xdp_multi_threaded, &afm);
     pause();
     cleanup();
 

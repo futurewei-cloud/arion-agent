@@ -39,7 +39,7 @@ using namespace std;
 static inline long ip4tol(const string ip) {
   struct sockaddr_in sa;
   if (inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr)) != 1) {
-    throw std::invalid_argument("Virtual ipv4 address is not in the expected format");
+//    throw std::invalid_argument("Virtual ipv4 address is not in the expected format");
   }
   return sa.sin_addr.s_addr;
 }
