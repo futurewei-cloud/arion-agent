@@ -185,6 +185,7 @@ bpool_init(struct bpool_params *params,
     /* bpool internals dimensioning. */
     n_slabs = (params->n_buffers + params->n_buffers_per_slab - 1) /
               params->n_buffers_per_slab;
+    printf("bpool_init: n_slabs = %ld\n", n_slabs);
     n_slabs_reserved = params->n_users_max * 2;
     n_buffers = n_slabs * params->n_buffers_per_slab;
     n_buffers_reserved = n_slabs_reserved * params->n_buffers_per_slab;
@@ -359,7 +360,7 @@ static inline u32
 bcache_cons_check(struct bcache *bc, u32 n_buffers)
 {
     struct bpool *bp = bc->bp;
-//    printf("bp->params.n_buffers_per_slab: %ld\n", bp->params.n_buffers_per_slab);
+//    printf("n_buffers: %ld\nbp->params.n_buffers_per_slab: %ld\n", n_buffers, bp->params.n_buffers_per_slab);
     u64 n_buffers_per_slab = bp->params.n_buffers_per_slab;
     u64 n_buffers_cons = bc->n_buffers_cons;
     u64 n_slabs_available;
@@ -380,8 +381,10 @@ bcache_cons_check(struct bcache *bc, u32 n_buffers)
 	 * (full) for a full slab from the pool, if any is available.
 	 */
     pthread_mutex_lock(&bp->lock);
+    printf("Locking bp\n");
     n_slabs_available = bp->n_slabs_available;
     if (!n_slabs_available) {
+        printf("Unlocking bp because !n_slabs_available)\n");
         pthread_mutex_unlock(&bp->lock);
         return 0;
     }
@@ -390,10 +393,12 @@ bcache_cons_check(struct bcache *bc, u32 n_buffers)
     slab_full = bp->slabs[n_slabs_available];
     bp->slabs[n_slabs_available] = bc->slab_cons;
     bp->n_slabs_available = n_slabs_available;
+    printf("Unlocking bp because traded a slab from bpool\n");
     pthread_mutex_unlock(&bp->lock);
 
     bc->slab_cons = slab_full;
     bc->n_buffers_cons = n_buffers_per_slab;
+    printf("bc->n_buffers_cons = %ld\n", bc->n_buffers_cons);
     return n_buffers;
 }
 
@@ -422,6 +427,7 @@ bcache_prod(struct bcache *bc, u64 buffer)
 	 */
     if (n_buffers_prod < n_buffers_per_slab) {
         bc->slab_prod[n_buffers_prod] = buffer;
+        printf("bcache_prod: n_buffers_prod: %ld\nn_buffers_per_slab: %ld\n", n_buffers_prod, n_buffers_per_slab);
         bc->n_buffers_prod = n_buffers_prod + 1;
         return;
     }
@@ -437,6 +443,7 @@ bcache_prod(struct bcache *bc, u64 buffer)
     n_slabs_available = bp->n_slabs_available;
     slab_empty = bp->slabs[n_slabs_available];
     bp->slabs[n_slabs_available] = bc->slab_prod;
+    printf("bcache_prod:     bp->n_slabs_available = n_slabs_available + 1;");
     bp->n_slabs_available = n_slabs_available + 1;
     pthread_mutex_unlock(&bp->lock);
 
@@ -529,6 +536,7 @@ port_init(struct port_params *params)
 
     memcpy(&p->params, params, sizeof(p->params));
     umem_fq_size = params->bp->umem_cfg.fill_size;
+    printf("port_init: umem_fq_size: %ld\n", umem_fq_size);
 
     /* bcache. */
     p->bc = bcache_init(params->bp);
@@ -569,7 +577,8 @@ port_init(struct port_params *params)
 
     xsk_ring_prod__submit(&p->umem_fq, umem_fq_size);
     p->umem_fq_initialized = 1;
-
+    printf("port init: queue: %d, n_buffers_cons: %ld, n_buffers_prod: %ld\n",
+           p->params.iface_queue, p->bc->n_buffers_cons, p->bc->n_buffers_prod);
     return p;
 }
 
@@ -580,13 +589,19 @@ port_rx_burst(struct port *p, struct burst_rx *b)
 
     /* Free buffers for FQ replenish. */
     n_pkts = ARRAY_SIZE(b->addr);
-
+    if (p->bc->n_buffers_cons == 0) {
+        printf("port_rx_burst: p->bc->n_buffers_cons == 0, need to trade slab from pool\n");
+    }
     n_pkts = bcache_cons_check(p->bc, n_pkts);
+//    printf("Queue: %ld ons_check got %ld packets\n", p->params.iface_queue,n_pkts);
+
     if (!n_pkts)
         return 0;
 
     /* RXQ. */
     n_pkts = xsk_ring_cons__peek(&p->rxq, n_pkts, &pos);
+//    printf("Queue: %ld RXQ got %ld packets\n", p->params.iface_queue,n_pkts);
+
     if (!n_pkts) {
         if (xsk_ring_prod__needs_wakeup(&p->umem_fq)) {
             struct pollfd pollfd = {
@@ -612,8 +627,10 @@ port_rx_burst(struct port *p, struct burst_rx *b)
         int status;
 
         status = xsk_ring_prod__reserve(&p->umem_fq, n_pkts, &pos);
-        if (status == n_pkts)
+        if (status == n_pkts) {
+//            printf("Queue: %ld Fill Queue got %ld packets, breaking\n", p->params.iface_queue,n_pkts);
             break;
+        }
 
         if (xsk_ring_prod__needs_wakeup(&p->umem_fq)) {
             struct pollfd pollfd = {
@@ -622,6 +639,7 @@ port_rx_burst(struct port *p, struct burst_rx *b)
             };
 
             poll(&pollfd, 1, 0);
+//            printf("Queue: %ld Fill Queue pooling for %ld packets\n", p->params.iface_queue,n_pkts);
         }
     }
 
@@ -633,7 +651,7 @@ port_rx_burst(struct port *p, struct burst_rx *b)
     printf("Queue: %ld rx burst got %ld packets\n", p->params.iface_queue,n_pkts);
     return n_pkts;
 }
-
+qq
 static inline void
 port_tx_burst(struct port *p, struct burst_tx *b)
 {
@@ -658,8 +676,10 @@ port_tx_burst(struct port *p, struct burst_tx *b)
 
     for ( ; ; ) {
         status = xsk_ring_prod__reserve(&p->txq, n_pkts, &pos);
-        if (status == n_pkts)
+        if (status == n_pkts) {
+//            printf("Queue: %ld TX Queue got %ld packets, breaking\n", p->params.iface_queue,n_pkts);
             break;
+        }
 
         if (xsk_ring_prod__needs_wakeup(&p->txq))
             sendto(xsk_socket__fd(p->xsk), NULL, 0, MSG_DONTWAIT,
@@ -675,7 +695,7 @@ port_tx_burst(struct port *p, struct burst_tx *b)
     if (xsk_ring_prod__needs_wakeup(&p->txq))
         sendto(xsk_socket__fd(p->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
     p->n_pkts_tx += n_pkts;
-    printf("tx burst sent %ld packets\n", n_pkts);
+//    printf("Queue: %ld tx burst sent %ld packets\n", p->params.iface_queue, n_pkts);
 }
 
 /*
@@ -716,6 +736,7 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
     printf(">>>>>>>>>>  Begin processing packet  >>>>>>>>>>\n");
 
     if (true) {
+        printf("Process packets: inside if (true)\n");
         /*
          * TODO: Parse packet here, get VNI, IP, MAC, lookup locally in DB, and replace neigbor host IP if found;
          * if NOT found, drop packet and remotely GET from Arion Master.
@@ -727,7 +748,7 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
         struct ethhdr *eth = (struct ethhdr *) pkt;
 
         if (ntohs(eth->h_proto) != ETH_P_IP) {
-            //            printf("%s\n", "returning false for this packet as it is NOT IP");
+            printf("Process packets: returning false for this packet as it is NOT IP %u\n", ntohs(eth->h_proto));
             return false;
         }
         printf("Packet length: %ld\n", len);
@@ -757,7 +778,7 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
 
         // parse VXLAN header
         struct vxlanhdr_internal* vxlan = (struct vxlanhdr_internal *)(udp + 1/*sizeof(*udp)*/);
-            printf("VNI: %ld, \n",trn_get_vni(vxlan->vni));
+        printf("VNI: %ld, \n",trn_get_vni(vxlan->vni));
 
         // parse inner eth header
         struct ethhdr *inner_eth = (struct ethhdr *)(vxlan + 1/*sizeof(*vxlan)*/);
@@ -892,8 +913,8 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
                 printf("Can't find endpoint!\n");
                 return false;
             }
-        }else if (ntohs(inner_eth->h_proto) == ETH_P_IP) {
-            // TODO: Add inner IP support, refer to trn_process_inner_ip
+        }
+        else if (ntohs(inner_eth->h_proto) == ETH_P_IP) {
             // parse inner IP header
             struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
             struct in_addr inner_ip_src;
@@ -957,7 +978,7 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
                        bpf_ntohs(eth->h_proto),
                        sizeof(*eth));
 
-                // parse outer IP header
+//                 parse outer IP header
                 struct iphdr *ip = (struct iphdr *) (eth + 1/*sizeof(*eth)*/);
                 struct in_addr outer_ip_src;
                 outer_ip_src.s_addr = ip->saddr;
@@ -1005,10 +1026,10 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
             }
         }
 
-                printf("Endpoing hip == 0, returning false.\n");
+        printf("Neither ARP or IP, returning false.\n");
         return false;
     }
-
+    printf("process packet: how is this false?\n");
     return false;
 }
 
@@ -1024,7 +1045,13 @@ thread_func(void *arg)
     CPU_ZERO(&cpu_cores);
     CPU_SET(t->cpu_core_id, &cpu_cores);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_cores);
-
+    for (int i = 0 ; i < t->n_ports_rx ; i ++) {
+        struct port * port_rx = t->ports_rx[i];
+        if (port_rx->bc->n_buffers_cons == 0) {
+            port_rx->bc->n_buffers_cons = 4096;
+            printf("Manually setting port %d n_buffer_cons to 4096\n", port_rx->params.iface_queue);
+        }
+    }
     for (i = 0; !t->quit; i = (i + 1) & (t->n_ports_rx - 1)) {
         struct port *port_rx = t->ports_rx[i];
         struct port *port_tx = t->ports_tx[i];
@@ -1041,8 +1068,10 @@ thread_func(void *arg)
 
         /* Process & TX. */
         for (j = 0; j < n_pkts; j++) {
+            printf("Queue %ld getting the %ld th packet\n", port_rx->params.iface_queue, j);
             u64 addr = xsk_umem__add_offset_to_addr(brx->addr[j]);
             u8 *pkt = static_cast<u8 *>(xsk_umem__get_data(port_rx->params.bp->addr, addr));
+            printf("Queue %ld processing the %ld th packet\n", port_rx->params.iface_queue, j);
 
             process_packet(pkt, brx->len[j]);
 //            swap_mac_addresses(pkt);
@@ -1050,7 +1079,6 @@ thread_func(void *arg)
             btx->addr[btx->n_pkts] = brx->addr[j];
             btx->len[btx->n_pkts] = brx->len[j];
             btx->n_pkts++;
-
             if (btx->n_pkts > 0/*== MAX_BURST_TX*/) {
                 port_tx_burst(port_tx, btx);
                 btx->n_pkts = 0;
