@@ -1129,7 +1129,7 @@ static const struct bpool_params  bpool_params_default = {
 };
 
 static const struct xsk_umem_config umem_cfg_default = {
-    .fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS * 2,
+    .fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,  //* 2,
     .comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
     .frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE,
     .frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
