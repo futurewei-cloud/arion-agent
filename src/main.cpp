@@ -25,7 +25,6 @@
 #include "marl/event.h"
 #include "marl/scheduler.h"
 #include "marl/waitgroup.h"
-#include "af_xdp_user.h"
 #include "af_xdp_user_multi_thread.h"
 #include "grpc_client.h"
 

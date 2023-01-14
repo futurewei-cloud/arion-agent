@@ -105,10 +105,10 @@ public:
             auto host_ip  = get<4>(row).c_str();
             auto vpc_mac = get<3>(row).c_str();
             auto host_mac = get<2>(row).c_str();
-            printf("Retrieved this endpoint from local DB: VNI: %ld, vpc_ip: %s, host_mac: %s, vpc_mac: %s, host_ip: %s\n",
-//                   get<0>(row), get<1>(row).c_str(), get<2>(row).c_str(), get<3>(row).c_str(), get<4>(row).c_str()
-                   vni, vpc_ip, host_mac, vpc_mac, host_ip
-                   );
+//            printf("Retrieved this endpoint from local DB: VNI: %ld, vpc_ip: %s, host_mac: %s, vpc_mac: %s, host_ip: %s\n",
+////                   get<0>(row), get<1>(row).c_str(), get<2>(row).c_str(), get<3>(row).c_str(), get<4>(row).c_str()
+//                   vni, vpc_ip, host_mac, vpc_mac, host_ip
+//                   );
             endpoint_key_t key;
             key.vni = vni; //(get<0>(row));
             struct sockaddr_in endpoint_vpc_ip_socket;
@@ -127,13 +127,13 @@ public:
             value.hip = endpoint_host_ip_socket.sin_addr.s_addr;
             endpoint_cache[key] = value;
 //            endpoint_cache.insert(key, value);
-            printf("Inserted this endpoint into cache: VNI: %ld, vpc_ip: %s, ", key.vni, inet_ntoa(endpoint_vpc_ip_socket.sin_addr));
-            printf("host_mac: %x:%x:%x:%x:%x:%x, vpc_mac: %x:%x:%x:%x:%x:%x, host_ip: %s\n",
-                   value.hmac[0],value.hmac[1],value.hmac[2],value.hmac[3],value.hmac[4],value.hmac[5],
-                   value.mac[0],value.mac[1],value.mac[2],value.mac[3],value.mac[4],value.mac[5],
-                   inet_ntoa(endpoint_host_ip_socket.sin_addr)
-            );
-            printf("Finished one endpoint\n");
+//            printf("Inserted this endpoint into cache: VNI: %ld, vpc_ip: %s, ", key.vni, inet_ntoa(endpoint_vpc_ip_socket.sin_addr));
+//            printf("host_mac: %x:%x:%x:%x:%x:%x, vpc_mac: %x:%x:%x:%x:%x:%x, host_ip: %s\n",
+//                   value.hmac[0],value.hmac[1],value.hmac[2],value.hmac[3],value.hmac[4],value.hmac[5],
+//                   value.mac[0],value.mac[1],value.mac[2],value.mac[3],value.mac[4],value.mac[5],
+//                   inet_ntoa(endpoint_host_ip_socket.sin_addr)
+//            );
+//            printf("Finished one endpoint\n");
         }
         printf("Finished retrieving from local DB, not endpoint cache has %ld endpoints\n", endpoint_cache.size());
     }

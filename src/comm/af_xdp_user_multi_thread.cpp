@@ -44,7 +44,6 @@
 #include <bpf_endian.h>
 
 
-
 #define VXL_DSTPORT 0xb512 // UDP dport 4789(0x12b5) for VxLAN overlay
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
@@ -574,7 +573,7 @@ port_init(struct port_params *params)
                                        &params->xsk_cfg);
     if (status) {
         port_free(p);
-        printf("port_init failed because xsk_socket__create_shared failed.\n");
+        printf("port_init failed because xsk_socket__create_shared failed. Status: %ld\n", status);
         return NULL;
     }
 
@@ -754,7 +753,7 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
                            )
 {
 //    printf(">>>>>>>>>>  Begin processing packet  >>>>>>>>>>\n");
-
+    bpf_lpm_trie_key k;
     if (true) {
 //        printf("Process packets: inside if (true)\n");
         /*
@@ -1061,7 +1060,6 @@ thread_func(void *arg)
     struct thread_data *t = static_cast<thread_data *>(arg);
     cpu_set_t cpu_cores;
     u32 i;
-
     CPU_ZERO(&cpu_cores);
     CPU_SET(t->cpu_core_id, &cpu_cores);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_cores);
@@ -1120,7 +1118,7 @@ thread_func(void *arg)
  * Process
  */
 static const struct bpool_params  bpool_params_default = {
-    .n_buffers = 64/*96*/ * 1024,
+    .n_buffers = 192 /* this number should be set to 64 * (number_of_cores / 8)*/ * 1024,
     .buffer_size = XSK_UMEM__DEFAULT_FRAME_SIZE,
     .mmap_flags = 0,
 
@@ -1133,7 +1131,7 @@ static const struct xsk_umem_config umem_cfg_default = {
     .comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
     .frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE,
     .frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
-    .flags = 0,
+    .flags = XDP_RING_NEED_WAKEUP,
 };
 
 static const struct port_params port_params_default = {
@@ -1281,9 +1279,12 @@ static void
 print_port(u32 port_id)
 {
     struct port *port = ports[port_id];
-
-    printf("Port %u: interface = %s, queue = %u\n",
-           port_id, port->params.iface, port->params.iface_queue);
+    int option;
+    socklen_t option_length  = sizeof(option);
+    getsockopt(xsk_socket__fd(port->xsk), SOL_XDP, XDP_OPTIONS, &option, (&option_length));
+    printf("Port %u: interface = %s, queue = %u, zero_copy_enabled: %s\n",
+           port_id, port->params.iface, port->params.iface_queue,
+           ((option == XDP_OPTIONS_ZEROCOPY ? "true" : "false")));
 }
 
 static void
@@ -1408,7 +1409,7 @@ void* af_xdp_user_multi_thread::run_af_xdp_multi_threaded(void* args/*int argc, 
            sizeof(struct bpool_params));
     memcpy(&umem_cfg, &umem_cfg_default,
            sizeof(struct xsk_umem_config));
-    umem_cfg.flags |= (XDP_RING_NEED_WAKEUP/*XDP_USE_NEED_WAKEUP*/ );
+//    umem_cfg.flags |= (XDP_RING_NEED_WAKEUP/*XDP_USE_NEED_WAKEUP*/ );
     for (i = 0; i < MAX_PORTS; i++)
         memcpy(&port_params[i], &port_params_default,
                sizeof(struct port_params));
@@ -1417,26 +1418,37 @@ void* af_xdp_user_multi_thread::run_af_xdp_multi_threaded(void* args/*int argc, 
 //        print_usage(argv[0]);
 //        return -1;
 //    }
-    auto number_of_cores = 8;//std::thread::hardware_concurrency();
+    auto number_of_cores = std::thread::hardware_concurrency();
     printf("This machine has %ld cores\n", number_of_cores);
-    // 2 ports(interfaces), same name, different q number.
-    n_ports = number_of_cores;
+    // leave 8 cores for the rest of the system.
+    n_ports = number_of_cores > 8 ? (number_of_cores - 8) : 0;
+
+    if (n_ports == 0) {
+        printf("This machine has too little number of cores(%ld), not good for AF_XDP. Exiting\n", number_of_cores);
+        exit(-1);
+    }
+
+    printf("After leaving 8 cores for other applications, we are now setting the interface to have %ld AF_XDP sockets.\n", n_ports);
+
+    string set_nic_queue_command_template = "ethtool -L enp4s0f1 combined %ld";
+    char set_nic_queue_command[100];
+    sprintf(set_nic_queue_command, "ethtool -L enp4s0f1 combined %ld", n_ports);
+    printf("Executing system command: %s\n", set_nic_queue_command);
+    int set_nic_queue_command_rc = system(set_nic_queue_command);
+
+    if (set_nic_queue_command_rc!=EXIT_SUCCESS) {
+        printf("set nic queue command failed(%ld)! Exiting\n", set_nic_queue_command_rc);
+        exit(-1);
+    }
 
     // using 1 thread per iface + iface_queue
-    n_threads = number_of_cores; // get number of cores of this machine.
+    n_threads = n_ports; // get number of cores of this machine.
 
-    for ( int i = 0 ; i < number_of_cores ; i ++) {
+    for ( int i = 0 ; i < n_ports ; i ++) {
         port_params[i].iface = "enp4s0f1";
         port_params[i].iface_queue = i;
         thread_data[i].cpu_core_id = i;
     }
-//    port_params[0].iface = "enp4s0f1";
-//    port_params[0].iface_queue = 0;
-//    thread_data[0].cpu_core_id = 0;
-//
-//    port_params[1].iface = "enp4s0f1";
-//    port_params[1].iface_queue = 1;
-//    thread_data[1].cpu_core_id = 1;
 
 
     /* Buffer pool initialization. */

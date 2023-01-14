@@ -3,8 +3,7 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../build/bin)
 set(SOURCES
     ./util/dispatch_queue.cpp
     ./comm/grpc_client.cpp
-    comm/af_xdp_user.cpp
-#    db/db_client.cpp
+        #    db/db_client.cpp
         comm/af_xdp_user_multi_thread.cpp )
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -idirafter /usr/src/linux-headers-5.10.4/include/")
 
