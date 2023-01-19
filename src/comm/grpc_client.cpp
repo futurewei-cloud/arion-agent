@@ -230,13 +230,14 @@ void ArionMasterWatcherImpl::ConnectToArionMaster() {
     printf("After initiating a new sub to connect to the Arion Master: %s\n", (server_address + ":" + server_port).c_str());
 }
 
-void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::string group, std::string table) {
+void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::string group, std::string endpoints_table, std::string security_group_rules_table) {
     printf("Running a grpc client in a separate thread id: %ld\n", std::this_thread::get_id());
 
     server_address = ip;
     server_port = port;
     group_id = group;
-    table_name_neighbor_ebpf_map = table;
+    table_name_neighbor_ebpf_map = endpoints_table;
+    table_name_sg_ebpf_map = security_group_rules_table;
 
     // Retrieve neighbor's ebpf map fd (handle)
     fd_neighbor_ebpf_map = bpf_obj_get(table_name_neighbor_ebpf_map.c_str());
@@ -246,6 +247,33 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
 //    } else {
 //        printf("Got xdp neighbor endpoint map fd %d\n", fd_neighbor_ebpf_map);
 //    }
+
+    // check if security group ebpf map exists, and create it if it doesn't
+
+    fd_security_group_ebpf_map = bpf_obj_get(table_name_sg_ebpf_map.c_str());
+
+    if (fd_security_group_ebpf_map < 0) {
+        printf("Creating security_group_ebpf_map manually\n");
+
+        struct bpf_lpm_trie_key *security_group_key;
+        size_t key_size_security_group;
+        key_size_security_group = sizeof(*security_group_key) + sizeof(__u32);
+
+        printf("Key size: %ld, value size: %ld\n", key_size_security_group, sizeof(security_group_rule_t));
+        fd_security_group_ebpf_map = bpf_create_map(BPF_MAP_TYPE_LPM_TRIE,
+                                                    key_size_security_group/*sizeof(security_group_rule_key_t)*/,
+                       sizeof(security_group_rule_t),
+                       999,  // need to change it to a bigger number later.
+                       0);
+
+        if (fd_security_group_ebpf_map <= 0) {
+            printf("Tried to manually create security group map, but failed with fd: %ld, and error no: %s, returning\n",
+                   fd_security_group_ebpf_map, std::strerror(errno));
+            exit(-1);
+        }
+        printf("Manually created security group map with fd: %ld, returning\n", fd_security_group_ebpf_map);
+
+    }
 
     // Create (if db not exists) or connect (if db exists already) to local db
     db_client::get_instance().local_db.sync_schema();

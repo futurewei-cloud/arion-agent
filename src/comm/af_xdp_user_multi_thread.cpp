@@ -38,6 +38,7 @@
 #include <linux/icmpv6.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
+#include <linux/tcp.h>
 #include "util.h"
 #include "xdp/trn_datamodel.h"
 #include <db_client.h>
@@ -936,6 +937,8 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
         else if (ntohs(inner_eth->h_proto) == ETH_P_IP) {
             // parse inner IP header
             struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
+
+
 //            struct in_addr inner_ip_src;
 //            inner_ip_src.s_addr = inner_ip->saddr;
             struct in_addr inner_ip_dest;
@@ -947,6 +950,27 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
             struct sockaddr_in ep_ip;
             inet_pton(AF_INET, inet_ntoa(inner_ip_dest/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
             epkey.ip = ep_ip.sin_addr.s_addr;
+
+
+            sg_cidr_key_t sg_key;
+            sg_key.protocol = inner_ip->protocol;
+            sg_key.ip = ep_ip.sin_addr.s_addr;
+            sg_key.vni = epkey.vni;
+            sg_key.direction = 1; // how to express goingout/coming in?
+            if (sg_key.protocol == IPPROTO_TCP) {
+                struct tcphdr *inner_tcp = (struct tcphdr *)(inner_ip + 1);
+                sg_key.port = bpf_htons(inner_tcp->dest);
+                sg_key.prefixlen = 136;
+                // how about lpm_key.data?
+            } else if (sg_key.protocol == IPPROTO_UDP) {
+                struct udphdr *inner_udp = (struct udphdr *)(inner_ip + 1);
+                sg_key.port = bpf_htons(inner_udp->dest);
+                sg_key.prefixlen = 136;
+                // how about lpm_key.data?
+            }
+
+
+
             auto ep_value = db_client::get_instance().GetNeighborInMemory(epkey);
             //            endpoint_t ep_value;
             //            ep_value = db_client::get_instance().GetNeighbor(trn_get_vni(vxlan->vni), inet_ntoa(inner_ip_dest));
@@ -1403,6 +1427,21 @@ void* af_xdp_user_multi_thread::run_af_xdp_multi_threaded(void* args/*int argc, 
     struct timespec time;
     u64 ns0;
     int i;
+
+    std::string table_name_neighbor_ebpf_map = "/sys/fs/bpf/endpoints_map";
+    int fd_neighbor_ebpf_map = bpf_obj_get(table_name_neighbor_ebpf_map.c_str());
+
+    std::string table_name_sg_ebpf_map = "/sys/fs/bpf/security_group_map";
+    int fd_security_group_ebpf_map = bpf_obj_get(table_name_sg_ebpf_map.c_str());
+
+    printf("endpoints map fd: %ld, sg map fd: %ld\n", fd_neighbor_ebpf_map, fd_security_group_ebpf_map);
+
+
+    if (fd_neighbor_ebpf_map <= 0 || fd_security_group_ebpf_map <= 0 ) {
+        printf("fd_neighbor_ebpf_map: %ld, fd_security_group_ebpf_map: %ld, exiting\n"
+               , fd_neighbor_ebpf_map, fd_security_group_ebpf_map);
+//        exit(-1);
+    }
 
     /* Parse args. */
     memcpy(&bpool_params, &bpool_params_default,

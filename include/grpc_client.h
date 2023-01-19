@@ -41,11 +41,13 @@ public:
 
     void ConnectToArionMaster();
 
-    void RunClient(std::string ip, std::string port, std::string group, std::string table);
+    void RunClient(std::string ip, std::string port, std::string group, std::string neighbor_table, std::string security_group_rules_table);
 
     bool a = chan_ == nullptr;
 
     int fd_neighbor_ebpf_map = -1;
+
+    int fd_security_group_ebpf_map = -1;
 
 private:
     std::string server_address;
@@ -56,6 +58,7 @@ private:
 
     std::string table_name_neighbor_ebpf_map;
 
+    std::string table_name_sg_ebpf_map;
 
     // key std::string is '<vni>-<vpc_ip>', value is inserted version of this neighbor
     folly::ConcurrentHashMap<std::string, int> neighbor_task_map;

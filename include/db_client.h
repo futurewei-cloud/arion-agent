@@ -91,6 +91,14 @@ public:
 
 
     void FillEndpointCacheFromDB() {
+        std::string table_name_sg_ebpf_map = "/sys/fs/bpf/security_group_map";
+        int fd_security_group_ebpf_map = bpf_obj_get(table_name_sg_ebpf_map.c_str());
+        printf("DB Client: sg map fd: %ld\n", fd_security_group_ebpf_map);
+
+        std::string table_name_sg_cidr_map = "/sys/fs/bpf/sg_cidr_map";
+        int fd_sg_cidr_ebpf_map = bpf_obj_get(table_name_sg_cidr_map.c_str());
+        printf("DB Client: sg cidr map fd: %ld\n", fd_security_group_ebpf_map);
+
         // Get all neighbors from SQLite Database
         auto get_all_neighbors_statement = local_db.prepare(
                 select(
@@ -134,6 +142,30 @@ public:
 //                   inet_ntoa(endpoint_host_ip_socket.sin_addr)
 //            );
 //            printf("Finished one endpoint\n");
+            security_group_key_t sg_key;
+            sg_key.vni = vni;
+            sg_key.ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
+            sg_key.direction = 0;
+            security_group_t sg_value;
+            sg_value.sg_id = 12345;
+            sg_value.action = 1;
+//            int sg_map_insert_rc = bpf_map_update_elem(fd_security_group_ebpf_map, &sg_key, &sg_value, BPF_ANY);
+//            printf("Sg map insert rc: %ld\n", sg_map_insert_rc);
+            sg_cidr_key_t sg_cidr_key;
+            sg_cidr_key.prefixlen = 64;
+//            inet_pton(AF_INET, vpc_ip, sg_cidr_key.lpm_key.data);
+            sg_cidr_key.ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
+            sg_cidr_key.vni = vni;
+            sg_cidr_key.direction = 1;
+            sg_cidr_key.protocol = IPPROTO_TCP;
+            sg_cidr_key.port = 888;
+            int sg_map_insert_rc = bpf_map_update_elem(fd_sg_cidr_ebpf_map, &sg_cidr_key, &sg_value, BPF_ANY);
+            if (sg_map_insert_rc != 0) {
+                printf("Error for inserting into lpm map: %s", std::strerror(errno));
+            }
+            printf("Sg map insert rc: %ld\n", sg_map_insert_rc);
+
+
         }
         printf("Finished retrieving from local DB, not endpoint cache has %ld endpoints\n", endpoint_cache.size());
     }

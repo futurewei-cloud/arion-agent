@@ -42,6 +42,7 @@ ArionMasterWatcherImpl *g_grpc_client = NULL;
 string g_arion_master_address = EMPTY_STRING;
 string g_arion_master_port = "9090";
 string g_arion_neighbor_table = "/sys/fs/bpf/endpoints_map";
+string g_arion_security_group_table = "/sys/fs/bpf/security_group_map";
 //TODO: let ArionMaster figure out group from ArionWing IP (in grpc channel)
 string g_arion_group = "group1";
 
@@ -142,17 +143,16 @@ int main(int argc, char *argv[]) {
     marl::schedule([=] {
         g_grpc_client->RunClient(g_arion_master_address,
                                  g_arion_master_port,
-                                 g_arion_group,
-                                 g_arion_neighbor_table);
+                                 g_arion_group,\
+                                 g_arion_neighbor_table,
+                                 g_arion_security_group_table);
     });
 
-//    marl::schedule([=] {
-//        auto af = af_xdp_user();
-//        af.run_af_xdp(/*g_arion_neighbor_table*/);
-//    });
+    /*
     auto afm = af_xdp_user_multi_thread();
     pthread_t t;
     pthread_create(&t, NULL, &af_xdp_user_multi_thread::run_af_xdp_multi_threaded, &afm);
+    */
     pause();
     cleanup();
 

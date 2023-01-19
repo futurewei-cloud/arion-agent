@@ -29,6 +29,7 @@
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <linux/types.h>
+#include "bpf.h"
 #define __ALIGNED_64__ __attribute__((aligned(64)))
 #define __ALWAYS_INLINE__ __attribute__((__always_inline__))
 
@@ -148,6 +149,22 @@ typedef struct {
 } __attribute__((packed, aligned(4))) endpoint_t;
 
 typedef struct {
+    __u8 prefix_len;
+    __u32 vni;
+    __u32 ip;
+    __u16 port;
+    __u8 protocol;
+    bool direction;
+    __u16 cidr[5]; // 192.168.16.0/23, 5 elements
+} __attribute__((packed, aligned(4))) security_group_rule_key_t;
+
+typedef struct {
+    bool action; // 0 or 1
+    __u16 port_range[2]; // assume it supports only 1 range, such as [9000,9016]
+    __u16 remote_group;  // remote group ID
+} __attribute__((packed, aligned(4))) security_group_rule_t;
+
+typedef struct {
 	__u32 ip;   // IP used for ZGC access
 	__u16 announced;    // non-zero indicates the MAC has been announced locally
 	__u8 mac[6]; // MAC to be used for ZGC entrance
@@ -215,3 +232,65 @@ typedef struct {
 		dp_encap_opdata_t encap;
 	} opdata;
 } __attribute__((packed, aligned(8))) flow_ctx_t;
+
+// #if connTrack
+struct ipv4_tuple_t {
+        __u32 saddr;
+        __u32 daddr;
+
+        /* ports */
+        __u16 sport;
+        __u16 dport;
+
+        /* Addresses */
+        __u8 protocol;
+
+        /*TODO: include TCP flags, no use case for the moment! */
+
+} __attribute__((packed));
+
+
+typedef struct  {
+        __u32 vni;
+        struct ipv4_tuple_t tuple;
+} __attribute__((packed)) contrack_key_t;
+
+
+typedef struct  {
+        __u32 hip;
+        unsigned char mac[6];
+        unsigned char hmac[6];
+} __attribute__ ((packed, aligned(4))) contrack_t;
+
+// #endif
+
+// #if sgSupport
+
+typedef struct {
+        __u32 prefixlen; /* up to 32 for AF_INET, 128 for AF_INET6*/
+        __u32 vni;
+        __u32 ip;
+        __u16 port;
+        __u8  direction;
+        __u8  protocol;
+} __attribute__((packed, aligned(4))) sg_cidr_key_t;
+
+
+typedef struct {
+        __u32 sg_id;
+        __u8 action;
+} __attribute__((packed, aligned(4))) sg_cidr_t;
+
+
+typedef struct  {
+        __u32 vni;
+        __u32 ip;
+        __u8  direction;
+} __attribute__((packed, aligned(4))) security_group_key_t;
+
+
+typedef struct {
+        __u32 sg_id;
+        __u8 action;
+} __attribute__((packed, aligned(4))) security_group_t;
+// #endif
