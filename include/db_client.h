@@ -152,9 +152,11 @@ public:
 //            int sg_map_insert_rc = bpf_map_update_elem(fd_security_group_ebpf_map, &sg_key, &sg_value, BPF_ANY);
 //            printf("Sg map insert rc: %ld\n", sg_map_insert_rc);
             sg_cidr_key_t sg_cidr_key;
-            sg_cidr_key.prefixlen = 64;
+            // add the number of bits for all fields, except prefexlen and dst_ip, then add the cidr range, in this case it is /24
+            sg_cidr_key.prefixlen = (32 + 16 + 8 + 8 + 32 + 24);
 //            inet_pton(AF_INET, vpc_ip, sg_cidr_key.lpm_key.data);
-            sg_cidr_key.ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
+            sg_cidr_key.src_ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
+            sg_cidr_key.dst_ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
             sg_cidr_key.vni = vni;
             sg_cidr_key.direction = 1;
             sg_cidr_key.protocol = IPPROTO_TCP;

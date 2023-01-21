@@ -939,22 +939,24 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
             struct iphdr *inner_ip = (struct iphdr *)(inner_eth + 1 /*sizeof(*inner_eth)*/);
 
 
-//            struct in_addr inner_ip_src;
-//            inner_ip_src.s_addr = inner_ip->saddr;
+            struct in_addr inner_ip_src;
+            inner_ip_src.s_addr = inner_ip->saddr;
             struct in_addr inner_ip_dest;
             inner_ip_dest.s_addr = inner_ip->daddr;
 //            printf("Inner IP src: %s\n", inet_ntoa(inner_ip_src));
 //            printf("Inner IP dest: %s\n", inet_ntoa(inner_ip_dest));
             endpoint_key_t epkey;
             epkey.vni = trn_get_vni(vxlan->vni);
-            struct sockaddr_in ep_ip;
+            struct sockaddr_in ep_ip, src_ip;
             inet_pton(AF_INET, inet_ntoa(inner_ip_dest/*inner_arp_dest_ip*/), &(ep_ip.sin_addr));
+            inet_pton(AF_INET, inet_ntoa(inner_ip_src), &(src_ip.sin_addr));
             epkey.ip = ep_ip.sin_addr.s_addr;
 
 
             sg_cidr_key_t sg_key;
             sg_key.protocol = inner_ip->protocol;
-            sg_key.ip = ep_ip.sin_addr.s_addr;
+            sg_key.src_ip = ep_ip.sin_addr.s_addr;
+            sg_key.dst_ip = src_ip.sin_addr.s_addr;
             sg_key.vni = epkey.vni;
             sg_key.direction = 1; // how to express goingout/coming in?
             if (sg_key.protocol == IPPROTO_TCP) {
