@@ -32,9 +32,31 @@ struct Neighbor {
     int version;
 }; // local db table 1 - neighbor info table that stores the latest neighbors (if there are version updates per neighbor) received from ArionMaster
 
-struct ProgrammingState {
+struct NeibghborProgrammingState {
     int version;
 }; // local db table 2 - neighbor ebpf programmed version
+
+struct SecurityGroupPortBinding {
+    std::string port_id; // vni-vpc_ip
+    std::string security_group_id;
+}; // local db table 3, stores the mapping between port and security group, 1 group can have multiple rules.
+
+struct SecurityGroupRule {
+    std::string security_group_id;
+    std::string remote_group_id;
+    std::string direction;
+    std::string remote_ip_prefix;
+    std::string protocol;
+    int port_range_max;
+    int port_range_min;
+    std::string ether_type;
+    int vni;
+    int version;
+};  // local db table 3, security group rule table that stores the latest security group rules (if there are version updates per neighbor) received from ArionMaster
+
+struct SecurityGroupProgrammingState {
+    int version;
+}; // local db table 2 - security rule ebpf programmed version
 
 // copied from arp_hash in ACA
 struct EndpointHash {
@@ -62,17 +84,33 @@ inline auto make_storage_query () {
                                    make_column("version", &Neighbor::version),
                                    primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
                                            ),
-                        make_table("journal",
-                                   make_column("version", &ProgrammingState::version),
-                                   primary_key(&ProgrammingState::version)
+                        make_table("journal_neighbor",
+                                   make_column("version", &NeibghborProgrammingState::version),
+                                   primary_key(&NeibghborProgrammingState::version)
+                                           ),
+                        make_table("security_group_rule",
+                                   make_column("security_group_id", &SecurityGroupRule::security_group_id),
+                                   make_column("remote_group_id", &SecurityGroupRule::remote_group_id),
+                                   make_column("direction", &SecurityGroupRule::direction),
+                                   make_column("remote_ip_prefix", &SecurityGroupRule::remote_ip_prefix),
+                                   make_column("protocol", &SecurityGroupRule::protocol),
+                                   make_column("port_range_max", &SecurityGroupRule::port_range_max),
+                                   make_column("port_range_min", &SecurityGroupRule::port_range_min),
+                                   make_column("ether_type", &SecurityGroupRule::ether_type),
+                                   make_column("vni", &SecurityGroupRule::vni),
+                                   make_column("version", &SecurityGroupRule::version),
+                                   primary_key(&SecurityGroupRule::remote_group_id)
+                                           ),
+                        make_table("journal_security_group_rules",
+                                   make_column("version", &SecurityGroupProgrammingState::version),
+                                   primary_key(&SecurityGroupProgrammingState::version)
                                            )
-    );
+                        );
 };
 
 using Storage = decltype(make_storage_query());
 
 class db_client {
-
 public:
     static db_client &get_instance() {
         static db_client instance;
@@ -90,6 +128,8 @@ public:
     std::unordered_map<endpoint_key_t, endpoint_t, EndpointHash, EndpointEqual> endpoint_cache;
 
 
+    // function that will be called at the beginning of the program, reads rows from the neighbor table
+    // and fills the in-memory endpoint cache, which is used for fast lookup.
     void FillEndpointCacheFromDB() {
         std::string table_name_sg_ebpf_map = "/sys/fs/bpf/security_group_map";
         int fd_security_group_ebpf_map = bpf_obj_get(table_name_sg_ebpf_map.c_str());
@@ -155,8 +195,8 @@ public:
             // add the number of bits for all fields, except prefexlen and dst_ip, then add the cidr range, in this case it is /24
             sg_cidr_key.prefixlen = (32 + 16 + 8 + 8 + 32 + 24);
 //            inet_pton(AF_INET, vpc_ip, sg_cidr_key.lpm_key.data);
-            sg_cidr_key.src_ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
-            sg_cidr_key.dst_ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
+            sg_cidr_key.local_ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
+            sg_cidr_key.remote_ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
             sg_cidr_key.vni = vni;
             sg_cidr_key.direction = 1;
             sg_cidr_key.protocol = IPPROTO_TCP;
@@ -185,14 +225,14 @@ public:
                 );
     */
 
-        using als_mo = alias_a<ProgrammingState>;
-        using als_mi = alias_b<ProgrammingState>;
-        auto ver_gaps = local_db.select(alias_column<als_mo>(&ProgrammingState::version),
+        using als_mo = alias_a<NeibghborProgrammingState>;
+        using als_mi = alias_b<NeibghborProgrammingState>;
+        auto ver_gaps = local_db.select(alias_column<als_mo>(&NeibghborProgrammingState::version),
                                         from<als_mo>(),
                                         where(not exists(
-                                                select(0 - c(alias_column<als_mi>(&ProgrammingState::version)),
+                                                select(0 - c(alias_column<als_mi>(&NeibghborProgrammingState::version)),
                                                        from<als_mi>(),
-                                                       where(is_equal(c(alias_column<als_mo>(&ProgrammingState::version)) + 1, alias_column<als_mi>(&ProgrammingState::version)))
+                                                       where(is_equal(c(alias_column<als_mo>(&NeibghborProgrammingState::version)) + 1, alias_column<als_mi>(&NeibghborProgrammingState::version)))
                                                                ))));
 
         // lkg version:

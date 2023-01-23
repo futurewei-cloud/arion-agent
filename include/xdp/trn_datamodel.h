@@ -149,16 +149,6 @@ typedef struct {
 } __attribute__((packed, aligned(4))) endpoint_t;
 
 typedef struct {
-    __u8 prefix_len;
-    __u32 vni;
-    __u32 ip;
-    __u16 port;
-    __u8 protocol;
-    bool direction;
-    __u16 cidr[5]; // 192.168.16.0/23, 5 elements
-} __attribute__((packed, aligned(4))) security_group_rule_key_t;
-
-typedef struct {
     bool action; // 0 or 1
     __u16 port_range[2]; // assume it supports only 1 range, such as [9000,9016]
     __u16 remote_group;  // remote group ID
@@ -272,8 +262,8 @@ typedef struct {
         __u16 port;
         __u8  direction;
         __u8  protocol;
-        __u32 src_ip;
-        __u32 dst_ip;
+        __u32 local_ip;
+        __u32 remote_ip;
 } __attribute__((packed, aligned(4))) sg_cidr_key_t;
 
 

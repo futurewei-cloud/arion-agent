@@ -955,8 +955,8 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
 
             sg_cidr_key_t sg_key;
             sg_key.protocol = inner_ip->protocol;
-            sg_key.src_ip = ep_ip.sin_addr.s_addr;
-            sg_key.dst_ip = src_ip.sin_addr.s_addr;
+            sg_key.local_ip = ep_ip.sin_addr.s_addr;
+            sg_key.remote_ip = src_ip.sin_addr.s_addr;
             sg_key.vni = epkey.vni;
             sg_key.direction = 1; // how to express goingout/coming in?
             if (sg_key.protocol == IPPROTO_TCP) {

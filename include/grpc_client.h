@@ -37,7 +37,7 @@ public:
 
     explicit ArionMasterWatcherImpl() {}
 
-    void RequestNeighborRules(ArionWingRequest *request, grpc::CompletionQueue *cq);
+    void RequestArionMaster(std::vector<ArionWingRequest *> *request_vector, grpc::CompletionQueue *cq);
 
     void ConnectToArionMaster();
 
@@ -62,11 +62,14 @@ private:
 
     // key std::string is '<vni>-<vpc_ip>', value is inserted version of this neighbor
     folly::ConcurrentHashMap<std::string, int> neighbor_task_map;
+
+    // key std::string is 'securitygroupid', value is inserted version of this security group rule
+    folly::ConcurrentHashMap<std::string, int> security_group_rule_task_map;
 };
 
 struct AsyncClientCall {
-    arion::schema::NeighborRule reply;
+    arion::schema::ArionWingResponse reply;
     grpc::ClientContext context;
     grpc::Status status;
-    std::unique_ptr<grpc::ClientAsyncReaderWriter<ArionWingRequest, NeighborRule> > stream;
+    std::unique_ptr<grpc::ClientAsyncReaderWriter<ArionWingRequest, ArionWingResponse> > stream;
 };
