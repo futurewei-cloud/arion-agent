@@ -39,6 +39,7 @@ struct NeibghborProgrammingState {
 struct SecurityGroupPortBinding {
     std::string port_id; // vni-vpc_ip
     std::string security_group_id;
+    int version;
 }; // local db table 3, stores the mapping between port and security group, 1 group can have multiple rules.
 
 struct SecurityGroupRule {
@@ -54,7 +55,7 @@ struct SecurityGroupRule {
     int version;
 };  // local db table 3, security group rule table that stores the latest security group rules (if there are version updates per neighbor) received from ArionMaster
 
-struct SecurityGroupProgrammingState {
+struct SecurityGroupPortBindingProgrammingState {
     int version;
 }; // local db table 2 - security rule ebpf programmed version
 
@@ -68,6 +69,21 @@ struct EndpointHash {
 struct EndpointEqual {
     bool operator() (const endpoint_key_t &e, const endpoint_key_t &f) const {
         return (e.vni == f.vni) && (e.ip == f.ip);
+    }
+};
+
+struct SecurityGroupRuleHash {
+    size_t operator()(const sg_cidr_key_t &e) const{
+        return std::hash<__u32>()(e.prefixlen) ^ std::hash<__u32>()(e.vni) ^ std::hash<__u16>()(e.port) ^
+               std::hash<__u8>()(e.direction) ^ std::hash<__u8>()(e.protocol) ^ std::hash<__u32>()(e.local_ip) ^
+               std::hash<__u32>()(e.remote_ip);
+    }
+};
+
+struct SecurityGroupRuleEqual {
+    bool operator() (const sg_cidr_key_t &e, const sg_cidr_key_t &f) const {
+        return (e.remote_ip == f.remote_ip) && (e.local_ip == f.local_ip) && (e.protocol == f.protocol) &&
+               (e.direction == f.direction) && (e.port == f.port) && (e.vni == f.vni) && (e.prefixlen == f.prefixlen);
     }
 };
 
@@ -101,9 +117,17 @@ inline auto make_storage_query () {
                                    make_column("version", &SecurityGroupRule::version),
                                    primary_key(&SecurityGroupRule::remote_group_id)
                                            ),
+                                                make_table("security_group_port_binding",
+                                   make_column("port_id", &SecurityGroupPortBinding::port_id),
+                                   make_column("security_group_id", &SecurityGroupPortBinding::security_group_id),
+                                   make_column("version", &SecurityGroupPortBinding::version),
+                                   primary_key(&SecurityGroupPortBinding::port_id, &SecurityGroupPortBinding::security_group_id, &SecurityGroupPortBinding::version)
+                                           ),
+                        // 1 version is written when all related SecurityGroupRules of a SecurityGroupPortBinding
+                        // is programmed into the eBPF map and written into the DB.
                         make_table("journal_security_group_rules",
-                                   make_column("version", &SecurityGroupProgrammingState::version),
-                                   primary_key(&SecurityGroupProgrammingState::version)
+                                   make_column("version", &SecurityGroupPortBindingProgrammingState::version),
+                                   primary_key(&SecurityGroupPortBindingProgrammingState::version)
                                            )
                         );
 };
@@ -120,12 +144,22 @@ public:
     Storage local_db = make_storage_query();
     using NeighborPrepareStatement = decltype(local_db.prepare(select(columns(&Neighbor::host_ip, &Neighbor::vpc_mac, &Neighbor::host_mac),
                                                  where(is_equal((&Neighbor::vni), 0) and is_equal((&Neighbor::vpc_ip), "127.0.0.1")))));
-    NeighborPrepareStatement query_neighbor_statement = local_db.prepare(select(columns(&Neighbor::host_ip, &Neighbor::vpc_mac, &Neighbor::host_mac),
-                                                            where(is_equal((&Neighbor::vni), 0) and is_equal((&Neighbor::vpc_ip), "127.0.0.1"))));
+    NeighborPrepareStatement query_neighbor_statement = local_db.prepare(
+            select(
+                    columns(&Neighbor::host_ip, &Neighbor::vpc_mac, &Neighbor::host_mac),
+                    where(
+                            is_equal((&Neighbor::vni), 0)
+                            and
+                            is_equal((&Neighbor::vpc_ip), "127.0.0.1")
+                            )
+                    )
+            );
     // Create local db writer single thread execution queue
     dispatch_queue local_db_writer_queue = dispatch_queue("Local db background write queue", 1);
 
     std::unordered_map<endpoint_key_t, endpoint_t, EndpointHash, EndpointEqual> endpoint_cache;
+
+    std::unordered_map<sg_cidr_key_t, sg_cidr_t, SecurityGroupRuleHash, SecurityGroupRuleEqual> sg_rule_cache;
 
 
     // function that will be called at the beginning of the program, reads rows from the neighbor table
