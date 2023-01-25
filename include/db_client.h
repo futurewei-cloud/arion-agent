@@ -90,46 +90,48 @@ struct SecurityGroupRuleEqual {
 static std::string g_local_db_path = "/var/local/arion/arion_wing.db";
 
 inline auto make_storage_query () {
-    return make_storage(g_local_db_path,
-                        make_table("neighbor",
-                                   make_column("vni", &Neighbor::vni),
-                                   make_column("vpc_ip", &Neighbor::vpc_ip),
-                                   make_column("host_ip", &Neighbor::host_ip),
-                                   make_column("vpc_mac", &Neighbor::vpc_mac),
-                                   make_column("host_mac", &Neighbor::host_mac),
-                                   make_column("version", &Neighbor::version),
-                                   primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
-                                           ),
-                        make_table("journal_neighbor",
-                                   make_column("version", &NeibghborProgrammingState::version),
-                                   primary_key(&NeibghborProgrammingState::version)
-                                           ),
-                        make_table("security_group_rule",
-                                   make_column("security_group_id", &SecurityGroupRule::security_group_id),
-                                   make_column("remote_group_id", &SecurityGroupRule::remote_group_id),
-                                   make_column("direction", &SecurityGroupRule::direction),
-                                   make_column("remote_ip_prefix", &SecurityGroupRule::remote_ip_prefix),
-                                   make_column("protocol", &SecurityGroupRule::protocol),
-                                   make_column("port_range_max", &SecurityGroupRule::port_range_max),
-                                   make_column("port_range_min", &SecurityGroupRule::port_range_min),
-                                   make_column("ether_type", &SecurityGroupRule::ether_type),
-                                   make_column("vni", &SecurityGroupRule::vni),
-                                   make_column("version", &SecurityGroupRule::version),
-                                   primary_key(&SecurityGroupRule::remote_group_id)
-                                           ),
-                                                make_table("security_group_port_binding",
-                                   make_column("port_id", &SecurityGroupPortBinding::port_id),
-                                   make_column("security_group_id", &SecurityGroupPortBinding::security_group_id),
-                                   make_column("version", &SecurityGroupPortBinding::version),
-                                   primary_key(&SecurityGroupPortBinding::port_id, &SecurityGroupPortBinding::security_group_id, &SecurityGroupPortBinding::version)
-                                           ),
-                        // 1 version is written when all related SecurityGroupRules of a SecurityGroupPortBinding
-                        // is programmed into the eBPF map and written into the DB.
-                        make_table("journal_security_group_rules",
-                                   make_column("version", &SecurityGroupPortBindingProgrammingState::version),
-                                   primary_key(&SecurityGroupPortBindingProgrammingState::version)
-                                           )
-                        );
+    auto storage = make_storage(g_local_db_path,
+                                make_table("neighbor",
+                                           make_column("vni", &Neighbor::vni),
+                                           make_column("vpc_ip", &Neighbor::vpc_ip),
+                                           make_column("host_ip", &Neighbor::host_ip),
+                                           make_column("vpc_mac", &Neighbor::vpc_mac),
+                                           make_column("host_mac", &Neighbor::host_mac),
+                                           make_column("version", &Neighbor::version),
+                                           primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
+                                                   ),
+                                make_table("journal_neighbor",
+                                           make_column("version", &NeibghborProgrammingState::version),
+                                           primary_key(&NeibghborProgrammingState::version)
+                                                   ),
+                                make_table("security_group_rule",
+                                           make_column("security_group_id", &SecurityGroupRule::security_group_id),
+                                           make_column("remote_group_id", &SecurityGroupRule::remote_group_id),
+                                           make_column("direction", &SecurityGroupRule::direction),
+                                           make_column("remote_ip_prefix", &SecurityGroupRule::remote_ip_prefix),
+                                           make_column("protocol", &SecurityGroupRule::protocol),
+                                           make_column("port_range_max", &SecurityGroupRule::port_range_max),
+                                           make_column("port_range_min", &SecurityGroupRule::port_range_min),
+                                           make_column("ether_type", &SecurityGroupRule::ether_type),
+                                           make_column("vni", &SecurityGroupRule::vni),
+                                           make_column("version", &SecurityGroupRule::version),
+                                           primary_key(&SecurityGroupRule::remote_group_id)
+                                                   ),
+                                make_table("security_group_port_binding",
+                                           make_column("port_id", &SecurityGroupPortBinding::port_id),
+                                           make_column("security_group_id", &SecurityGroupPortBinding::security_group_id),
+                                           make_column("version", &SecurityGroupPortBinding::version),
+                                           primary_key(&SecurityGroupPortBinding::port_id, &SecurityGroupPortBinding::security_group_id, &SecurityGroupPortBinding::version)
+                                                   ),
+                                // 1 version is written when all related SecurityGroupRules of a SecurityGroupPortBinding
+                                // is programmed into the eBPF map and written into the DB.
+                                make_table("journal_security_group_rules",
+                                           make_column("version", &SecurityGroupPortBindingProgrammingState::version),
+                                           primary_key(&SecurityGroupPortBindingProgrammingState::version)
+                                                   )
+    );
+    storage.sync_schema();
+    return storage;
 };
 
 using Storage = decltype(make_storage_query());
@@ -142,6 +144,7 @@ public:
     };
 
     Storage local_db = make_storage_query();
+
     using NeighborPrepareStatement = decltype(local_db.prepare(select(columns(&Neighbor::host_ip, &Neighbor::vpc_mac, &Neighbor::host_mac),
                                                  where(is_equal((&Neighbor::vni), 0) and is_equal((&Neighbor::vpc_ip), "127.0.0.1")))));
     NeighborPrepareStatement query_neighbor_statement = local_db.prepare(

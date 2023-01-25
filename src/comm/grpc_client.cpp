@@ -458,16 +458,15 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
     if (fd_security_group_ebpf_map < 0) {
         printf("Creating security_group_ebpf_map manually\n");
 
-        struct bpf_lpm_trie_key *security_group_key;
         size_t key_size_security_group;
-        key_size_security_group = sizeof(*security_group_key) + sizeof(__u32);
+        key_size_security_group = sizeof(sg_cidr_key_t);
 
-        printf("Key size: %ld, value size: %ld\n", key_size_security_group, sizeof(security_group_rule_t));
+        printf("Key size: %ld, value size: %ld\n", key_size_security_group, sizeof(sg_cidr_t));
         fd_security_group_ebpf_map = bpf_create_map(BPF_MAP_TYPE_LPM_TRIE,
-                                                    key_size_security_group/*sizeof(security_group_rule_key_t)*/,
-                       sizeof(security_group_rule_t),
+                                                    key_size_security_group,
+                       sizeof(sg_cidr_t),
                        999,  // need to change it to a bigger number later.
-                       0);
+                       BPF_F_NO_PREALLOC);
 
         if (fd_security_group_ebpf_map <= 0) {
             printf("Tried to manually create security group map, but failed with fd: %ld, and error no: %s, returning\n",
@@ -477,9 +476,6 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
         printf("Manually created security group map with fd: %ld, returning\n", fd_security_group_ebpf_map);
 
     }
-
-    // Create (if db not exists) or connect (if db exists already) to local db
-    db_client::get_instance().local_db.sync_schema();
 
     // Find lkg version to reconcile/sync from server
     int rev_lkg = db_client::get_instance().FindLKGVersion();
