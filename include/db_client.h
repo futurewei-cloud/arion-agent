@@ -219,6 +219,7 @@ public:
 //                   inet_ntoa(endpoint_host_ip_socket.sin_addr)
 //            );
 //            printf("Finished one endpoint\n");
+            /*
             security_group_key_t sg_key;
             sg_key.vni = vni;
             sg_key.ip = endpoint_vpc_ip_socket.sin_addr.s_addr;
@@ -242,7 +243,8 @@ public:
             if (sg_map_insert_rc != 0) {
                 printf("Error for inserting into lpm map: %s", std::strerror(errno));
             }
-            printf("Sg map insert rc: %ld\n", sg_map_insert_rc);
+            */
+//            printf("Sg map insert rc: %ld\n", sg_map_insert_rc);
 
 
         }

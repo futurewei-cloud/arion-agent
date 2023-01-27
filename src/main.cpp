@@ -42,7 +42,7 @@ ArionMasterWatcherImpl *g_grpc_client = NULL;
 string g_arion_master_address = EMPTY_STRING;
 string g_arion_master_port = "9090";
 string g_arion_neighbor_table = "/sys/fs/bpf/endpoints_map";
-string g_arion_security_group_table = "/sys/fs/bpf/security_group_map";
+string g_arion_security_group_table = "/sys/fs/bpf/sg_cidr_map";
 //TODO: let ArionMaster figure out group from ArionWing IP (in grpc channel)
 string g_arion_group = "group1";
 
@@ -133,6 +133,7 @@ int main(int argc, char *argv[]) {
     // Create marl scheduler using all the logical processors available to the process.
     // Bind this scheduler to the main thread so we can call marl::schedule()
     marl::Scheduler::Config cfg_bind_hw_cores;
+
     cfg_bind_hw_cores.setWorkerThreadCount(thread_pools_size * 2);
     marl::Scheduler task_scheduler(cfg_bind_hw_cores);
     task_scheduler.bind();

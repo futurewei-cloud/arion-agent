@@ -43,8 +43,8 @@ using namespace arion::schema;
 
 void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *request_vector,
                                                   grpc::CompletionQueue *cq) {
-    grpc::ClientContext ctx;
-    arion::schema::NeighborRule reply;
+//    grpc::ClientContext ctx;
+//    arion::schema::NeighborRule reply;
 
     // prepared statements for better performance of db writing in completion queue
 
@@ -75,7 +75,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
 
     int tag_watch = 1;
     printf("Completion queue: initial task, async watch\n");
-    stub_->AsyncWatch(&call->context, cq, (void*) tag_watch);
+//    stub_->AsyncWatch(&call->context, cq, (void*) tag_watch);
     call->stream = stub_->AsyncWatch(&call->context, cq, (void*)tag_watch);
 
     // start time
@@ -83,6 +83,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
 
     std::atomic<int> i(tag_watch + 1);
     bool write_done = false;
+    int current_write_request_index = 0;
     while (cq->Next(&got_tag, &ok)) {
         printf("Read one from grpc stream\n");
         if (ok) {
@@ -90,14 +91,26 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                 printf("Completion queue: initial task response received\n");
 
                 printf("Completion queue: write async watch ArionWingRequest of [group, revision] to stream\n");
+                call->stream->Write(*(request_vector->at(current_write_request_index)), (void*)tag_watch);
+                printf("Just wrote request with rev: [%ld], map: [%s] and group id: [%s]\n",
+                       (request_vector->at(current_write_request_index))->rev(),
+                        (request_vector->at(current_write_request_index))->map().c_str(),
+                         (request_vector->at(current_write_request_index)->group().c_str())
+                );
+                current_write_request_index ++;
+                if (current_write_request_index == request_vector->size()) {
+                    write_done = true;
+                }
+                /*
                 for (auto &request : *request_vector) {
                     call->stream->Write(*request, (void*)tag_watch);
-                    printf("Just wrote request with rev: [%ld], map: [%ld] and group id: [%ld]\n",
+                    printf("Just wrote request with rev: [%ld], map: [%s] and group id: [%s]\n",
                            request->rev(), request->map().c_str(), request->group().c_str()
                            );
                 }
 
                 write_done = true;
+                */
             } else {
                 call->stream->Read(&call->reply, got_tag);
                 if (call->reply.has_neighbor_rule()) {
@@ -206,7 +219,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                                     add_programmed_neighbor_version_db_stmt);
                                         });
                                     }
-                                    printf("Dispatched local db journal insert\n");
+                                    printf("Dispatched local db neighbor journal insert\n");
                                 } else {
                                     printf("ebpf_ignored = true\n");
                                     // step #4 (case 2) - always write to local db table 2 (programming journal) when version intended ignored (no need to program older version)
@@ -327,7 +340,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                     );
 //                                    printf("Retrieved %ld rows of security group rules with security group id == [%s]\n", rows.size(), security_group_id.c_str());
                                     int ebpf_rc = 0;
-                                    /*
+                                    printf("Found %ld sg rules related to this ID: %s\n", rows.size(), security_group_id.c_str());
                                     for (auto &rule : rows) {
                                         // step #2 - sync syscall ebpf map programming with return code
                                         string remote_ip;
@@ -343,7 +356,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         sg_key.prefixlen = prefixlen + 96; // 96 = ( __u32 vni; + __u16 port; + __u8  direction; + __u8  protocol; + __u32 local_ip; )
                                         sg_key.remote_ip = remote_ip_sock.sin_addr.s_addr;
                                         sg_key.local_ip = local_ip_sock.sin_addr.s_addr;
-                                        sg_key.direction = rule.direction == "out" ? 0 : 1; // going out is 0 and coming in is 1
+                                        sg_key.direction = rule.direction == "egress" ? 0 : 1; // going out is 0 and coming in is 1
 
                                         if (rule.protocol == "TCP") {
                                             sg_key.protocol = IPPROTO_TCP;
@@ -358,15 +371,18 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         sg_cidr_t sg_value;
                                         sg_value.sg_id = 1;
                                         sg_value.action = 1; // 1 for allow and other values for drop
-
+                                        printf("Inserting sg rule with prefixlen: %ld VNI: %s, port: %ld, direction: %s, protocol: %s, local_ip: %s, remote_ip: %s\n",
+                                               prefixlen, vni.c_str(), rule.port_range_min, rule.direction.c_str(), rule.protocol.c_str(), vpc_ip.c_str(), remote_ip.c_str());
                                         int single_ebpf_rc = bpf_map_update_elem(fd, &sg_key, &sg_value, BPF_ANY);
                                         if (single_ebpf_rc != 0) {
                                             ebpf_rc = single_ebpf_rc;
                                             printf("Tried to insert into sg rule ebpf map, but got RC: [%ld], errno: [%s]\n", single_ebpf_rc, std::strerror(errno));
+                                        } else {
+                                            printf("Insert into sg eBPF map returned %ld\n", single_ebpf_rc);
                                         }
                                         // also put in local in memory cache
                                         db_client::get_instance().sg_rule_cache[sg_key] = sg_value;//.insert(epkey, ep);
-                                        printf("GPPC: Inserted this neighbor into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni.c_str());
+                                        printf("GPPC: Inserted this sg rule into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni.c_str());
 
                                     }
                                     // step #3 - async call to write/update to local db table
@@ -374,7 +390,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         get<0>(add_or_update_security_group_port_binding_stmt) = { port_id, security_group_id };
                                         db_client::get_instance().local_db.execute(add_or_update_security_group_port_binding_stmt);
                                     });
-                                    printf("Dispatched local db neighbor insert\n");
+                                    printf("Dispatched local db security group port binding insert\n");
 
                                     // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
                                     if (0 == ebpf_rc) {
@@ -386,8 +402,8 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                     } else {
                                         printf("ebpf_rc = [%ld], this version isn't finished, NOT updating the local DB.\n", ebpf_rc);
                                     }
-                                    printf("Dispatched local db journal insert\n");
-                                     */
+                                    printf("Dispatched local db sg journal insert\n");
+
 
                                 } else {
                                     printf("ebpf_ignored = true\n");
@@ -487,8 +503,8 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
     vector<ArionWingRequest *> arion_request_vector;
     ArionWingRequest neighbor_watch_req;
     neighbor_watch_req.set_map("NeighborRule");
-    neighbor_watch_req.set_group(group_id);
-    neighbor_watch_req.set_rev(rev_lkg);
+    neighbor_watch_req.set_group(""/*group_id*/);
+    neighbor_watch_req.set_rev(0/*rev_lkg*/);
 
     ArionWingRequest security_group_rule_watch_req;
     security_group_rule_watch_req.set_map("SecurityGroupRule");
@@ -496,7 +512,13 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
     security_group_rule_watch_req.set_rev(0);
     // set empty group rule for now.
     security_group_rule_watch_req.set_group("");
+
+    ArionWingRequest security_group_port_binding_watch_req;
+    security_group_port_binding_watch_req.set_map("SecurityGroupPortBinding");
+    security_group_port_binding_watch_req.set_rev(0);
+    security_group_port_binding_watch_req.set_group("");
     arion_request_vector.emplace_back(&neighbor_watch_req);
     arion_request_vector.emplace_back(&security_group_rule_watch_req);
+    arion_request_vector.emplace_back(&security_group_port_binding_watch_req);
     this->RequestArionMaster(&arion_request_vector, &cq);
 }
