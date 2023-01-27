@@ -952,7 +952,9 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
             inet_pton(AF_INET, inet_ntoa(inner_ip_src), &(src_ip.sin_addr));
             epkey.ip = ep_ip.sin_addr.s_addr;
 
-
+            /*
+             *  TODO: implement SG Logic
+             * */
             sg_cidr_key_t sg_key;
             sg_key.protocol = inner_ip->protocol;
             sg_key.local_ip = ep_ip.sin_addr.s_addr;
@@ -1081,7 +1083,7 @@ static bool process_packet(void *pkt, uint32_t len/*,struct xsk_socket_info *xsk
 
 
 static void *
-thread_func(void *arg)
+run_af_xdp_socket(void *arg)
 {
     struct thread_data *t = static_cast<thread_data *>(arg);
     cpu_set_t cpu_cores;
@@ -1471,6 +1473,9 @@ void* af_xdp_user_multi_thread::run_af_xdp_multi_threaded(void* args/*int argc, 
 
     printf("After leaving 8 cores for other applications, we are now setting the interface to have %ld AF_XDP sockets.\n", n_ports);
 
+    /*
+     * TODO: Make NIC name configurable.
+     * */
     string set_nic_queue_command_template = "ethtool -L enp4s0f1 combined %ld";
     char set_nic_queue_command[100];
     sprintf(set_nic_queue_command, "ethtool -L enp4s0f1 combined %ld", n_ports);
@@ -1537,7 +1542,7 @@ void* af_xdp_user_multi_thread::run_af_xdp_multi_threaded(void* args/*int argc, 
 
         status = pthread_create(&threads[i],
                                 NULL,
-                                thread_func,
+                                run_af_xdp_socket,
                                 &thread_data[i]);
         if (status) {
             printf("Thread %d creation failed.\n", i);

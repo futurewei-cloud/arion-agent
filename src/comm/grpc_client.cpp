@@ -50,7 +50,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
 
     // neighbor state, has ebpf map and local db table
     auto add_or_update_neighbor_db_stmt = db_client::get_instance().local_db.prepare(replace(Neighbor{ 0, "", "", "", "", 0 }));
-    auto add_programmed_neighbor_version_db_stmt = db_client::get_instance().local_db.prepare(insert(NeibghborProgrammingState{ 0 }));
+    auto add_programmed_neighbor_version_db_stmt = db_client::get_instance().local_db.prepare(insert(NeighborProgrammingState{ 0 }));
 
     // security group rules, has local db, but NOT ebpf map
     auto add_or_update_security_group_rule_db_stmt = db_client::get_instance().local_db.prepare(replace(::SecurityGroupRule{ "", "", "", "", "", 0, 0, "", 0, 0 }));
@@ -87,6 +87,10 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
     while (cq->Next(&got_tag, &ok)) {
         printf("Read one from grpc stream\n");
         if (ok) {
+            /*
+             *  TODO: Associate call with the tag_watch, so that the write_done can be got rid of.
+             *  
+             * */
             if (!write_done) {
                 printf("Completion queue: initial task response received\n");
 
@@ -333,9 +337,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                     // step 1.5 get all related security group rules.
                                     auto rows = db_client::get_instance().local_db.get_all<::SecurityGroupRule>(
                                             where(
-//                                                    is_equal(
-                                                            c(&::SecurityGroupRule::security_group_id) == security_group_id.c_str()
-//                                                    )
+                                                        c(&::SecurityGroupRule::security_group_id) == security_group_id.c_str()
                                             )
                                     );
 //                                    printf("Retrieved %ld rows of security group rules with security group id == [%s]\n", rows.size(), security_group_id.c_str());
@@ -509,6 +511,9 @@ void ArionMasterWatcherImpl::RunClient(std::string ip, std::string port, std::st
     ArionWingRequest security_group_rule_watch_req;
     security_group_rule_watch_req.set_map("SecurityGroupRule");
     // set version 0 for now.
+    /* TODO: Change the version and group name to valid ones,
+        Same group of neighbor and security group should have the same version
+     */
     security_group_rule_watch_req.set_rev(0);
     // set empty group rule for now.
     security_group_rule_watch_req.set_group("");

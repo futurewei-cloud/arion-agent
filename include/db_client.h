@@ -32,7 +32,7 @@ struct Neighbor {
     int version;
 }; // local db table 1 - neighbor info table that stores the latest neighbors (if there are version updates per neighbor) received from ArionMaster
 
-struct NeibghborProgrammingState {
+struct NeighborProgrammingState {
     int version;
 }; // local db table 2 - neighbor ebpf programmed version
 
@@ -101,8 +101,8 @@ inline auto make_storage_query () {
                                            primary_key(&Neighbor::vni, &Neighbor::vpc_ip)
                                                    ),
                                 make_table("journal_neighbor",
-                                           make_column("version", &NeibghborProgrammingState::version),
-                                           primary_key(&NeibghborProgrammingState::version)
+                                           make_column("version", &NeighborProgrammingState::version),
+                                           primary_key(&NeighborProgrammingState::version)
                                                    ),
                                 make_table("security_group_rule",
                                            make_column("security_group_id", &SecurityGroupRule::security_group_id),
@@ -264,14 +264,14 @@ public:
                 );
     */
 
-        using als_mo = alias_a<NeibghborProgrammingState>;
-        using als_mi = alias_b<NeibghborProgrammingState>;
-        auto ver_gaps = local_db.select(alias_column<als_mo>(&NeibghborProgrammingState::version),
+        using als_mo = alias_a<NeighborProgrammingState>;
+        using als_mi = alias_b<NeighborProgrammingState>;
+        auto ver_gaps = local_db.select(alias_column<als_mo>(&NeighborProgrammingState::version),
                                         from<als_mo>(),
                                         where(not exists(
-                                                select(0 - c(alias_column<als_mi>(&NeibghborProgrammingState::version)),
+                                                select(0 - c(alias_column<als_mi>(&NeighborProgrammingState::version)),
                                                        from<als_mi>(),
-                                                       where(is_equal(c(alias_column<als_mo>(&NeibghborProgrammingState::version)) + 1, alias_column<als_mi>(&NeibghborProgrammingState::version)))
+                                                       where(is_equal(c(alias_column<als_mo>(&NeighborProgrammingState::version)) + 1, alias_column<als_mi>(&NeighborProgrammingState::version)))
                                                                ))));
 
         // lkg version:
