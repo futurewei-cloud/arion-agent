@@ -362,7 +362,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
 
                                         struct sockaddr_in local_ip_sock, remote_ip_sock;
                                         inet_pton(AF_INET, vpc_ip.c_str(), &(local_ip_sock.sin_addr));
-                                        inet_pton(AF_INET, remote_ip.c_str(), &(local_ip_sock.sin_addr));
+                                        inet_pton(AF_INET, remote_ip.c_str(), &(remote_ip_sock.sin_addr));
                                         sg_cidr_key_t sg_key;
                                         sg_key.vni = vni;
                                         sg_key.prefixlen = prefixlen + 96; // 96 = ( __u32 vni; + __u16 port; + __u8  direction; + __u8  protocol; + __u32 local_ip; )
@@ -509,7 +509,7 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
 
                                         struct sockaddr_in local_ip_sock, remote_ip_sock;
                                         inet_pton(AF_INET, vpc_ip.c_str(), &(local_ip_sock.sin_addr));
-                                        inet_pton(AF_INET, remote_ip.c_str(), &(local_ip_sock.sin_addr));
+                                        inet_pton(AF_INET, remote_ip.c_str(), &(remote_ip_sock.sin_addr));
                                         sg_cidr_key_t sg_key;
                                         sg_key.vni = atoi(vni.c_str());
                                         sg_key.prefixlen = prefixlen + 96; // 96 = ( __u32 vni; + __u16 port; + __u8  direction; + __u8  protocol; + __u32 local_ip; )
