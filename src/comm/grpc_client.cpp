@@ -171,6 +171,17 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         // update: journal table (since this skipped version is treated as programming succeeded)
                                         ebpf_ignored = true;
                                         map_updated = true;
+
+                                        // step #2 - sync syscall ebpf map programming with return code
+                                        ebpf_rc = bpf_map_update_elem(fd, &epkey, &ep, BPF_ANY);
+                                        if (ebpf_rc < 0) {
+                                            // safely rollback
+                                            //     rollback version
+                                            neighbor_task_map.assign(neighbor_key, cur_ver);
+
+                                            //     rollback map status
+                                            map_updated = false;
+                                        }
                                     }
                                 }
 

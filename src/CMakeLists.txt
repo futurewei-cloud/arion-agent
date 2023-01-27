@@ -2,6 +2,7 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../build/bin)
 
 set(SOURCES
     ./util/dispatch_queue.cpp
+    ./util/segment_lock.cpp
     ./comm/grpc_client.cpp
         #    db/db_client.cpp
         comm/af_xdp_user_multi_thread.cpp )

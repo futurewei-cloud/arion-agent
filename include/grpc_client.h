@@ -21,6 +21,7 @@
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
 #include "arionmaster.grpc.pb.h"
+#include "segment_lock.h"
 #include <sqlite_orm.h>
 #include <concurrency/ConcurrentHashMap.h>
 #include "bpf.h"
@@ -65,6 +66,8 @@ private:
 
     // key std::string is 'securitygroupid', value is inserted version of this security group rule
     folly::ConcurrentHashMap<std::string, int> security_group_rule_task_map;
+    // segment lock for neighbor key version control
+    SegmentLock segment_lock;
 };
 
 struct AsyncClientCall {
