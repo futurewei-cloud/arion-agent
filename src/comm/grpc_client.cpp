@@ -517,9 +517,9 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         sg_key.local_ip = local_ip_sock.sin_addr.s_addr;
                                         sg_key.direction = rule.direction == "egress" ? 0 : 1; // going out is 0 and coming in is 1
 
-                                        if (rule.protocol == "TCP") {
+                                        if (rule.protocol == "tcp") {
                                             sg_key.protocol = IPPROTO_TCP;
-                                        } else if (rule.protocol == "UDP") {
+                                        } else if (rule.protocol == "udp") {
                                             sg_key.protocol = IPPROTO_UDP;
                                         } else {
                                             sg_key.protocol = IPPROTO_NONE;
