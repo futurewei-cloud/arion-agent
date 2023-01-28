@@ -538,6 +538,10 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                             int update_ct = 0, max_update_ct = 5;
 
                             while (!map_updated && (update_ct < max_update_ct)) {
+                                // lock transaction section
+                                //     segment lock allows some level of concurrent manipulations of concurrent version map
+                                //     as long as the multi-threading version updates' keys are not hashed to the same slot in segment array
+                                segment_lock.lock(security_group_id);
                                 printf("Inside while loop, map_updated = [%b], update_ct = [%ld], max_update_ct = [%ld]\n",
                                        map_updated, update_ct, max_update_ct);
                                 auto sg_pos = security_group_rule_task_map.find(security_group_port_binding_id);
@@ -549,6 +553,77 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         // means successfully inserted, done with update
                                         map_updated = true;
                                         printf("Found neighbor key in security_group_rule_task_map\n");
+                                        // step 1.5 get all related security group rules.
+                                        auto rows = db_client::get_instance().local_db.get_all<::SecurityGroupRule>(
+                                                where(
+                                                        c(&::SecurityGroupRule::security_group_id) == security_group_id.c_str()
+                                                                )
+                                        );
+                                        //                                    printf("Retrieved %ld rows of security group rules with security group id == [%s]\n", rows.size(), security_group_id.c_str());
+                                        int ebpf_rc = 0;
+                                        printf("Found %ld sg rules related to this ID: %s\n", rows.size(), security_group_id.c_str());
+                                        for (auto &rule : rows) {
+                                            // step #2 - sync syscall ebpf map programming with return code
+                                            string remote_ip;
+                                            int prefixlen = 0 ;
+                                            remote_ip = rule.remote_ip_prefix.substr(0, rule.remote_ip_prefix.find("/"));
+                                            prefixlen = atoi((rule.remote_ip_prefix.substr(rule.remote_ip_prefix.find("/") + 1).c_str()));
+
+                                            struct sockaddr_in local_ip_sock, remote_ip_sock;
+                                            inet_pton(AF_INET, vpc_ip.c_str(), &(local_ip_sock.sin_addr));
+                                            inet_pton(AF_INET, remote_ip.c_str(), &(remote_ip_sock.sin_addr));
+                                            sg_cidr_key_t sg_key;
+                                            sg_key.vni = atoi(vni.c_str());
+                                            sg_key.prefixlen = prefixlen + 96; // 96 = ( __u32 vni; + __u16 port; + __u8  direction; + __u8  protocol; + __u32 local_ip; )
+                                            sg_key.remote_ip = remote_ip_sock.sin_addr.s_addr;
+                                            sg_key.local_ip = local_ip_sock.sin_addr.s_addr;
+                                            sg_key.direction = rule.direction == "egress" ? 0 : 1; // going out is 0 and coming in is 1
+
+                                            if (rule.protocol == "tcp") {
+                                                sg_key.protocol = IPPROTO_TCP;
+                                            } else if (rule.protocol == "udp") {
+                                                sg_key.protocol = IPPROTO_UDP;
+                                            } else {
+                                                sg_key.protocol = IPPROTO_NONE;
+                                            }
+
+                                            sg_key.port = rule.port_range_min; //TODO: see if we should use this or other fields
+
+                                            sg_cidr_t sg_value;
+                                            sg_value.sg_id = 1;
+                                            sg_value.action = 1; // 1 for allow and other values for drop
+                                            printf("Inserting sg rule with prefixlen: %ld VNI: %s, port: %ld, direction: %s, protocol: %s, local_ip: %s, remote_ip: %s\n",
+                                                   prefixlen, vni.c_str(), rule.port_range_min, rule.direction.c_str(), rule.protocol.c_str(), vpc_ip.c_str(), remote_ip.c_str());
+                                            int single_ebpf_rc = bpf_map_update_elem(fd, &sg_key, &sg_value, BPF_ANY);
+                                            if (single_ebpf_rc != 0) {
+                                                ebpf_rc = single_ebpf_rc;
+                                                printf("Tried to insert into sg rule ebpf map, but got RC: [%ld], errno: [%s]\n", single_ebpf_rc, std::strerror(errno));
+                                            } else {
+                                                printf("Insert into sg eBPF map returned %ld\n", single_ebpf_rc);
+                                            }
+                                            // also put in local in memory cache
+                                            db_client::get_instance().sg_rule_cache[sg_key] = sg_value;//.insert(epkey, ep);
+                                            printf("GPPC: Inserted this sg rule into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni.c_str());
+
+                                        }
+                                        // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
+                                        if (0 == ebpf_rc) {
+                                            db_client::get_instance().local_db_writer_queue.dispatch([version, &add_programmed_security_group_port_binding_version_db_stmt] {
+                                                get<0>(add_programmed_security_group_port_binding_version_db_stmt) = { version };
+                                                db_client::get_instance().local_db.execute(
+                                                        add_programmed_security_group_port_binding_version_db_stmt);
+                                            });
+                                        } else {
+                                            printf("ebpf_rc = [%ld], this version isn't finished, NOT updating the local DB.\n", ebpf_rc);
+                                        }
+                                        printf("Dispatched local db sg journal insert\n");
+                                        // step #3 - async call to write/update to local db table
+                                        db_client::get_instance().local_db_writer_queue.dispatch([security_group_id, port_id, version, &add_or_update_security_group_port_binding_stmt] {
+                                            get<0>(add_or_update_security_group_port_binding_stmt) = { port_id, security_group_id };
+                                            db_client::get_instance().local_db.execute(add_or_update_security_group_port_binding_stmt);
+                                        });
+                                        printf("Dispatched local db security group port binding insert\n");
+
                                     } // 'else' means another thread already inserted before me, then it's not an insert case and next time in the loop will go to case of update
                                 } else {
                                     printf("Didn't find neighbor key in security_group_rule_task_map\n");
@@ -559,8 +634,78 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                         // only update neighbor version
                                         //   1. when received (from ArionMaster) neighbor version is greater than current version in map
                                         //   2. and only if the element to update is the original element (version in 'find')
-                                        if (security_group_rule_task_map.assign_if_equal(security_group_port_binding_id, version, cur_ver)) {
+                                        if (security_group_rule_task_map.assign(security_group_port_binding_id, version)) {
                                             map_updated = true;
+                                            // step 1.5 get all related security group rules.
+                                            auto rows = db_client::get_instance().local_db.get_all<::SecurityGroupRule>(
+                                                    where(
+                                                            c(&::SecurityGroupRule::security_group_id) == security_group_id.c_str()
+                                                                    )
+                                            );
+                                            //                                    printf("Retrieved %ld rows of security group rules with security group id == [%s]\n", rows.size(), security_group_id.c_str());
+                                            int ebpf_rc = 0;
+                                            printf("Found %ld sg rules related to this ID: %s\n", rows.size(), security_group_id.c_str());
+                                            for (auto &rule : rows) {
+                                                // step #2 - sync syscall ebpf map programming with return code
+                                                string remote_ip;
+                                                int prefixlen = 0 ;
+                                                remote_ip = rule.remote_ip_prefix.substr(0, rule.remote_ip_prefix.find("/"));
+                                                prefixlen = atoi((rule.remote_ip_prefix.substr(rule.remote_ip_prefix.find("/") + 1).c_str()));
+
+                                                struct sockaddr_in local_ip_sock, remote_ip_sock;
+                                                inet_pton(AF_INET, vpc_ip.c_str(), &(local_ip_sock.sin_addr));
+                                                inet_pton(AF_INET, remote_ip.c_str(), &(remote_ip_sock.sin_addr));
+                                                sg_cidr_key_t sg_key;
+                                                sg_key.vni = atoi(vni.c_str());
+                                                sg_key.prefixlen = prefixlen + 96; // 96 = ( __u32 vni; + __u16 port; + __u8  direction; + __u8  protocol; + __u32 local_ip; )
+                                                sg_key.remote_ip = remote_ip_sock.sin_addr.s_addr;
+                                                sg_key.local_ip = local_ip_sock.sin_addr.s_addr;
+                                                sg_key.direction = rule.direction == "egress" ? 0 : 1; // going out is 0 and coming in is 1
+
+                                                if (rule.protocol == "tcp") {
+                                                    sg_key.protocol = IPPROTO_TCP;
+                                                } else if (rule.protocol == "udp") {
+                                                    sg_key.protocol = IPPROTO_UDP;
+                                                } else {
+                                                    sg_key.protocol = IPPROTO_NONE;
+                                                }
+
+                                                sg_key.port = rule.port_range_min; //TODO: see if we should use this or other fields
+
+                                                sg_cidr_t sg_value;
+                                                sg_value.sg_id = 1;
+                                                sg_value.action = 1; // 1 for allow and other values for drop
+                                                printf("Inserting sg rule with prefixlen: %ld VNI: %s, port: %ld, direction: %s, protocol: %s, local_ip: %s, remote_ip: %s\n",
+                                                       prefixlen, vni.c_str(), rule.port_range_min, rule.direction.c_str(), rule.protocol.c_str(), vpc_ip.c_str(), remote_ip.c_str());
+                                                int single_ebpf_rc = bpf_map_update_elem(fd, &sg_key, &sg_value, BPF_ANY);
+                                                if (single_ebpf_rc != 0) {
+                                                    ebpf_rc = single_ebpf_rc;
+                                                    printf("Tried to insert into sg rule ebpf map, but got RC: [%ld], errno: [%s]\n", single_ebpf_rc, std::strerror(errno));
+                                                } else {
+                                                    printf("Insert into sg eBPF map returned %ld\n", single_ebpf_rc);
+                                                }
+                                                // also put in local in memory cache
+                                                db_client::get_instance().sg_rule_cache[sg_key] = sg_value;//.insert(epkey, ep);
+                                                printf("GPPC: Inserted this sg rule into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni.c_str());
+
+                                            }
+                                            // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
+                                            if (0 == ebpf_rc) {
+                                                db_client::get_instance().local_db_writer_queue.dispatch([version, &add_programmed_security_group_port_binding_version_db_stmt] {
+                                                    get<0>(add_programmed_security_group_port_binding_version_db_stmt) = { version };
+                                                    db_client::get_instance().local_db.execute(
+                                                            add_programmed_security_group_port_binding_version_db_stmt);
+                                                });
+                                            } else {
+                                                printf("ebpf_rc = [%ld], this version isn't finished, NOT updating the local DB.\n", ebpf_rc);
+                                            }
+                                            printf("Dispatched local db sg journal insert\n");
+                                            // step #3 - async call to write/update to local db table
+                                            db_client::get_instance().local_db_writer_queue.dispatch([security_group_id, port_id, version, &add_or_update_security_group_port_binding_stmt] {
+                                                get<0>(add_or_update_security_group_port_binding_stmt) = { port_id, security_group_id };
+                                                db_client::get_instance().local_db.execute(add_or_update_security_group_port_binding_stmt);
+                                            });
+                                            printf("Dispatched local db security group port binding insert\n");
                                         }
                                     } else {
                                         // otherwise
@@ -575,84 +720,12 @@ void ArionMasterWatcherImpl::RequestArionMaster(vector<ArionWingRequest *> *requ
                                 }
 
                                 update_ct++;
+                                segment_lock.unlock(security_group_id);
                             }
 
                             if (map_updated) {
                                 if (!ebpf_ignored) {
                                     printf("ebpf_ignored = false\n");
-                                    // step 1.5 get all related security group rules.
-                                    auto rows = db_client::get_instance().local_db.get_all<::SecurityGroupRule>(
-                                            where(
-                                                        c(&::SecurityGroupRule::security_group_id) == security_group_id.c_str()
-                                            )
-                                    );
-//                                    printf("Retrieved %ld rows of security group rules with security group id == [%s]\n", rows.size(), security_group_id.c_str());
-                                    int ebpf_rc = 0;
-                                    printf("Found %ld sg rules related to this ID: %s\n", rows.size(), security_group_id.c_str());
-                                    for (auto &rule : rows) {
-                                        // step #2 - sync syscall ebpf map programming with return code
-                                        string remote_ip;
-                                        int prefixlen = 0 ;
-                                        remote_ip = rule.remote_ip_prefix.substr(0, rule.remote_ip_prefix.find("/"));
-                                        prefixlen = atoi((rule.remote_ip_prefix.substr(rule.remote_ip_prefix.find("/") + 1).c_str()));
-
-                                        struct sockaddr_in local_ip_sock, remote_ip_sock;
-                                        inet_pton(AF_INET, vpc_ip.c_str(), &(local_ip_sock.sin_addr));
-                                        inet_pton(AF_INET, remote_ip.c_str(), &(remote_ip_sock.sin_addr));
-                                        sg_cidr_key_t sg_key;
-                                        sg_key.vni = atoi(vni.c_str());
-                                        sg_key.prefixlen = prefixlen + 96; // 96 = ( __u32 vni; + __u16 port; + __u8  direction; + __u8  protocol; + __u32 local_ip; )
-                                        sg_key.remote_ip = remote_ip_sock.sin_addr.s_addr;
-                                        sg_key.local_ip = local_ip_sock.sin_addr.s_addr;
-                                        sg_key.direction = rule.direction == "egress" ? 0 : 1; // going out is 0 and coming in is 1
-
-                                        if (rule.protocol == "tcp") {
-                                            sg_key.protocol = IPPROTO_TCP;
-                                        } else if (rule.protocol == "udp") {
-                                            sg_key.protocol = IPPROTO_UDP;
-                                        } else {
-                                            sg_key.protocol = IPPROTO_NONE;
-                                        }
-
-                                        sg_key.port = rule.port_range_min; //TODO: see if we should use this or other fields
-
-                                        sg_cidr_t sg_value;
-                                        sg_value.sg_id = 1;
-                                        sg_value.action = 1; // 1 for allow and other values for drop
-                                        printf("Inserting sg rule with prefixlen: %ld VNI: %s, port: %ld, direction: %s, protocol: %s, local_ip: %s, remote_ip: %s\n",
-                                               prefixlen, vni.c_str(), rule.port_range_min, rule.direction.c_str(), rule.protocol.c_str(), vpc_ip.c_str(), remote_ip.c_str());
-                                        int single_ebpf_rc = bpf_map_update_elem(fd, &sg_key, &sg_value, BPF_ANY);
-                                        if (single_ebpf_rc != 0) {
-                                            ebpf_rc = single_ebpf_rc;
-                                            printf("Tried to insert into sg rule ebpf map, but got RC: [%ld], errno: [%s]\n", single_ebpf_rc, std::strerror(errno));
-                                        } else {
-                                            printf("Insert into sg eBPF map returned %ld\n", single_ebpf_rc);
-                                        }
-                                        // also put in local in memory cache
-                                        db_client::get_instance().sg_rule_cache[sg_key] = sg_value;//.insert(epkey, ep);
-                                        printf("GPPC: Inserted this sg rule into map: vip: %s, vni: %s\n", vpc_ip.c_str(), vni.c_str());
-
-                                    }
-                                    // step #3 - async call to write/update to local db table
-                                    db_client::get_instance().local_db_writer_queue.dispatch([security_group_id, port_id, version, &add_or_update_security_group_port_binding_stmt] {
-                                        get<0>(add_or_update_security_group_port_binding_stmt) = { port_id, security_group_id };
-                                        db_client::get_instance().local_db.execute(add_or_update_security_group_port_binding_stmt);
-                                    });
-                                    printf("Dispatched local db security group port binding insert\n");
-
-                                    // step #4 (case 1) - when ebpf programming not ignored, write to table 2 (programming journal) when programming succeeded
-                                    if (0 == ebpf_rc) {
-                                        db_client::get_instance().local_db_writer_queue.dispatch([version, &add_programmed_security_group_port_binding_version_db_stmt] {
-                                            get<0>(add_programmed_security_group_port_binding_version_db_stmt) = { version };
-                                            db_client::get_instance().local_db.execute(
-                                                    add_programmed_security_group_port_binding_version_db_stmt);
-                                        });
-                                    } else {
-                                        printf("ebpf_rc = [%ld], this version isn't finished, NOT updating the local DB.\n", ebpf_rc);
-                                    }
-                                    printf("Dispatched local db sg journal insert\n");
-
-
                                 } else {
                                     printf("ebpf_ignored = true\n");
                                     // step #4 (case 2) - always write to local db table 2 (programming journal) when version intended ignored (no need to program older version)
