@@ -12,7 +12,7 @@
 //     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 //     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#include "grpc_client.h"
+//#include "grpc_client.h"
 
 #include <thread>
 #include <chrono>
@@ -25,6 +25,8 @@
 #include "marl/event.h"
 #include "marl/scheduler.h"
 #include "marl/waitgroup.h"
+#include "af_xdp_user_multi_thread.h"
+#include "grpc_client.h"
 
 using namespace std;
 using std::string;
@@ -40,6 +42,7 @@ ArionMasterWatcherImpl *g_grpc_client = NULL;
 string g_arion_master_address = EMPTY_STRING;
 string g_arion_master_port = "9090";
 string g_arion_neighbor_table = "/sys/fs/bpf/endpoints_map";
+string g_arion_security_group_table = "/sys/fs/bpf/sg_cidr_map";
 //TODO: let ArionMaster figure out group from ArionWing IP (in grpc channel)
 string g_arion_group = "group1";
 
@@ -100,7 +103,7 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
-    while ((option = getopt(argc, argv, "a:p:g:d:")) != -1) {
+    while ((option = getopt(argc, argv, "a:p:g:d")) != -1) {
         switch (option) {
         case 'a':
             g_arion_master_address = optarg;
@@ -125,9 +128,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    printf("Read arion master IP: [%s], arion master port: [%s], arion group name: [%s]\n",
+           g_arion_master_address.c_str(), g_arion_master_port.c_str(), g_arion_group.c_str());
     // Create marl scheduler using all the logical processors available to the process.
     // Bind this scheduler to the main thread so we can call marl::schedule()
     marl::Scheduler::Config cfg_bind_hw_cores;
+
     cfg_bind_hw_cores.setWorkerThreadCount(thread_pools_size * 2);
     marl::Scheduler task_scheduler(cfg_bind_hw_cores);
     task_scheduler.bind();
@@ -138,10 +144,16 @@ int main(int argc, char *argv[]) {
     marl::schedule([=] {
         g_grpc_client->RunClient(g_arion_master_address,
                                  g_arion_master_port,
-                                 g_arion_group,
-                                 g_arion_neighbor_table);
+                                 g_arion_group,\
+                                 g_arion_neighbor_table,
+                                 g_arion_security_group_table);
     });
 
+    /*
+    auto afm = af_xdp_user_multi_thread();
+    pthread_t t;
+    pthread_create(&t, NULL, &af_xdp_user_multi_thread::run_af_xdp_multi_threaded, &afm);
+    */
     pause();
     cleanup();
 
