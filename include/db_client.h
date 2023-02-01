@@ -43,6 +43,7 @@ struct SecurityGroupPortBinding {
 }; // local db table 3, stores the mapping between port and security group, 1 group can have multiple rules.
 
 struct SecurityGroupRule {
+    std::string id; //UUID, should be key in DB
     std::string security_group_id;
     std::string remote_group_id;
     std::string direction;
@@ -105,6 +106,7 @@ inline auto make_storage_query () {
                                            primary_key(&NeighborProgrammingState::version)
                                                    ),
                                 make_table("security_group_rule",
+                                           make_column("id", &SecurityGroupRule::id),
                                            make_column("security_group_id", &SecurityGroupRule::security_group_id),
                                            make_column("remote_group_id", &SecurityGroupRule::remote_group_id),
                                            make_column("direction", &SecurityGroupRule::direction),
@@ -115,7 +117,7 @@ inline auto make_storage_query () {
                                            make_column("ether_type", &SecurityGroupRule::ether_type),
                                            make_column("vni", &SecurityGroupRule::vni),
                                            make_column("version", &SecurityGroupRule::version),
-                                           primary_key(&SecurityGroupRule::remote_group_id)
+                                           primary_key(&SecurityGroupRule::id)
                                                    ),
                                 make_table("security_group_port_binding",
                                            make_column("port_id", &SecurityGroupPortBinding::port_id),
